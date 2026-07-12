@@ -7,10 +7,12 @@ import anthropic
 from .models import InferenceConfig, InferenceResponse, Message
 
 
-
-
 class LLMClient:
-    """Thin wrapper around the Anthropic SDK for single-turn inference."""
+    """Thin wrapper around the Anthropic SDK.
+
+    Stateless: takes a full message history per call and returns a response.
+    Conversation state is owned by the caller.
+    """
 
     def __init__(self):
 
@@ -21,17 +23,17 @@ class LLMClient:
 
     def infer(
         self,
-        user_message: str,
+        messages: list[Message],
         config: InferenceConfig | None = None,
     ) -> InferenceResponse:
-        """Send a single user message and return the assistant response.
+        """Run one inference over the given message history.
 
         Uses streaming internally so long outputs don't hit request timeouts.
         """
         if config is None:
             config = InferenceConfig()
 
-        messages = [Message(role="user", content=user_message)]
+  
         api_messages = [m.to_api_dict() for m in messages]
 
         # Build kwargs; only include 'system' and 'thinking' when set

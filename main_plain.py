@@ -5,7 +5,7 @@ import os
 from dotenv import load_dotenv
 
 from src.plain_python.client import LLMClient
-from src.plain_python.models import InferenceConfig
+from src.plain_python.models import InferenceConfig, Message
 
 load_dotenv()  # reads ANTHROPIC_API_KEY from .env if present
 
@@ -21,9 +21,9 @@ def main() -> None:
 
     user_message = "how to bring back the confidence and self esteem after several times of falling in the job interviewing processes"
 
-    print(f"User: {user_message}\n")
+    messages = [Message(role="user", content=user_message)]
 
-    response = client.infer(user_message=user_message, config=config)
+    response = client.infer(messages=messages, config=config)
 
     print(f"Assistant: {response.text}")
     print(f"\n--- usage ---")
