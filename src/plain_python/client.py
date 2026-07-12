@@ -6,16 +6,17 @@ import anthropic
 
 from .models import InferenceConfig, InferenceResponse, Message
 
-_API_KEY_ENV = "ANTHROPIC_API_KEY"
+
 
 
 class LLMClient:
     """Thin wrapper around the Anthropic SDK for single-turn inference."""
 
     def __init__(self):
-        api_key = os.environ.get(_API_KEY_ENV)
+
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError(f"{_API_KEY_ENV} environment variable is not set")
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
         self._client = anthropic.Anthropic(api_key=api_key)
 
     def infer(
@@ -41,8 +42,8 @@ class LLMClient:
         }
         if config.system:
             kwargs["system"] = config.system
-        if config.thinking:
-            kwargs["thinking"] = config.thinking
+        # if config.thinking:
+        #     kwargs["thinking"] = config.thinking
 
         # .stream() + .get_final_message() gives us streaming safety with a
         # clean blocking interface — no partial-response handling needed here.

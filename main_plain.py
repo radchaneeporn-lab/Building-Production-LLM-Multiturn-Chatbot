@@ -14,13 +14,12 @@ def main() -> None:
     client = LLMClient()
 
     config = InferenceConfig(
-        model="claude-opus-4-8",
+        model="claude-haiku-4-5-20251001",
         max_tokens=1024,
-        system="You are a helpful assistant. Be concise.",
-        thinking={"type": "adaptive"},
+        system="You are a helpful assistant. Be concise."
     )
 
-    user_message = "Explain why sometimes making mistakes or fail in thing benefit us"
+    user_message = "how to bring back the confidence and self esteem after several times of falling in the job interviewing processes"
 
     print(f"User: {user_message}\n")
 

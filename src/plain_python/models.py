@@ -14,15 +14,15 @@ class Message:
     def to_api_dict(self) -> dict:
         return {"role": self.role, "content": self.content}
 
-
+ 
 @dataclass
 class InferenceConfig:
-    model: str = "claude-opus-4-8"
+    model: str = "claude-haiku-4-5-20251001"
     max_tokens: int = 16_000
     system: str | None = None
     # Adaptive thinking: model decides whether to think based on complexity.
     # Set to None to disable thinking entirely.
-    thinking: dict | None = field(default_factory=lambda: {"type": "adaptive"})
+    # thinking: dict | None = field(default_factory=lambda: {"type": "adaptive"})
 
 
 @dataclass
