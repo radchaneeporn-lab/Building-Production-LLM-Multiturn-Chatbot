@@ -24,7 +24,8 @@ def main() -> None:
     messages = [Message(role="user", content=user_message)]
 
     response = client.infer(messages=messages, config=config)
-
+    # anthropic client has many inference type, can chosse client.infer(), client.infer_create,
+    # client.infer_streaming
     print(f"Assistant: {response.text}")
     print(f"\n--- usage ---")
     print(f"input tokens : {response.input_tokens}")

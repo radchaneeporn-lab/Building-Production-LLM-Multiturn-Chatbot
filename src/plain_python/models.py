@@ -20,10 +20,11 @@ class InferenceConfig:
     model: str = "claude-haiku-4-5-20251001"
     max_tokens: int = 16_000
     system: str | None = None
+    # Above configuration depend on the model also
     # Adaptive thinking: model decides whether to think based on complexity.
     # Set to None to disable thinking entirely.
     # thinking: dict | None = field(default_factory=lambda: {"type": "adaptive"})
-
+    
 
 @dataclass
 class InferenceResponse:

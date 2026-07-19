@@ -18,6 +18,8 @@ class LLMClient:
     infer()                   .stream() + final msg    your current code: streaming safety, blocking feel
     infer_streaming()         .stream() + deltas       true incremental output; changes the return contract
     (footnote at bottom)      .create(stream=True)     raw events, no accumulation; rarely what you want
+
+    Next: if I back at this, I will continue learning the decoding stategies that can use with each inference technique
     """
 
     def __init__(self):
