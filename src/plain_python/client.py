@@ -46,6 +46,38 @@ class LLMClient:
         )
 
     # ------------------------------------------------------------------
+    # UTILITY: count_tokens() — sizing, not generation
+    # ------------------------------------------------------------------
+    def count_tokens(
+        self,
+        messages: list[Message],
+        config: InferenceConfig | None = None,
+    ) -> int:
+        """How many tokens would `messages` cost — no completion generated.
+
+        [LEARNING] Why this exists instead of reusing InferenceResponse
+        fields: `response.input_tokens` from infer()/infer_create() is
+        cumulative for that ENTIRE call's request (system + every message
+        sent), not the marginal size of any one message in it. You cannot
+        subtract your way back to "just this new message's tokens" from
+        that number without the arithmetic drifting turn over turn. This
+        endpoint answers the narrower question directly and accurately:
+        the token count of exactly the content you pass in, nothing else.
+        """
+        if config is None:
+            config = InferenceConfig()
+
+        kwargs: dict = {
+            "model": config.model,
+            "messages": [m.to_api_dict() for m in messages],
+        }
+        if config.system:
+            kwargs["system"] = config.system
+
+        result = self._client.messages.count_tokens(**kwargs)
+        return result.input_tokens
+
+    # ------------------------------------------------------------------
     # VARIANT 1: plain .create() — the simplest possible inference
     # ------------------------------------------------------------------
     def infer_create(

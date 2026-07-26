@@ -52,6 +52,19 @@ class ConversationStore(Protocol):
     def load(self, session_id: str) -> list[Message]: ...
     def append(self, session_id: str, *messages: Message) -> None: ...
 
+    # [LEARNING] get_summary/set_summary are a DIFFERENT kind of seam than
+    # the four methods above. load/append work with `messages` — an
+    # append-only, immutable source of truth (see the docstring above on
+    # why append() beats save()). The rolling summary is the opposite: a
+    # derived, MUTABLE cache that exists purely to avoid re-summarizing
+    # old turns from scratch every call. If it were lost, you could
+    # regenerate it by re-summarizing `messages` — it is not itself a
+    # record worth protecting, just a speed-up. Keeping it on a separate
+    # method pair (rather than folding it into messages) keeps that
+    # distinction visible in the interface, not just in a comment.
+    def get_summary(self, session_id: str) -> tuple[str | None, int]: ...
+    def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Implementation 1: in-memory dict — the "before" picture
@@ -68,6 +81,7 @@ class InMemoryStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, list[Message]] = {}
+        self._summaries: dict[str, tuple[str | None, int]] = {}
 
     def create_session(self) -> str:
         # [LEARNING] uuid4 = random, unguessable, no coordination needed.
@@ -76,6 +90,7 @@ class InMemoryStore:
         # else's conversation).
         session_id = str(uuid.uuid4())
         self._sessions[session_id] = []
+        self._summaries[session_id] = (None, 0)
         return session_id
 
     def session_exists(self, session_id: str) -> bool:
@@ -90,6 +105,14 @@ class InMemoryStore:
 
     def append(self, session_id: str, *messages: Message) -> None:
         self._sessions[session_id].extend(messages)
+
+    def get_summary(self, session_id: str) -> tuple[str | None, int]:
+        if session_id not in self._summaries:
+            raise KeyError(session_id)
+        return self._summaries[session_id]
+
+    def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None:
+        self._summaries[session_id] = (summary, summarized_through_turn)
 
 
 # ---------------------------------------------------------------------------
@@ -117,8 +140,10 @@ class SQLiteStore:
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
-                id         TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                id                      TEXT PRIMARY KEY,
+                created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+                summary_text            TEXT,
+                summarized_through_turn INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -129,11 +154,40 @@ class SQLiteStore:
                 turn_index INTEGER NOT NULL,
                 role       TEXT    NOT NULL,
                 content    TEXT    NOT NULL,
+                token_count INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT    NOT NULL DEFAULT (datetime('now')),
                 PRIMARY KEY (session_id, turn_index)
             )
             """
         )
+        self._conn.commit()
+        self._migrate_add_summary_columns()
+        self._migrate_add_token_count_column()
+
+    def _migrate_add_summary_columns(self) -> None:
+        # [LEARNING] CREATE TABLE IF NOT EXISTS only helps a BRAND-NEW
+        # database file. A conversations.db created before this feature
+        # existed already has a `sessions` table WITHOUT these two
+        # columns, and IF NOT EXISTS does nothing to an existing table's
+        # shape. PRAGMA table_info lists the columns a table actually
+        # has, so we can add whatever's missing — a tiny hand-rolled
+        # migration, standing in for what alembic/etc. automate for real
+        # schema changes on a live production database.
+        existing_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(sessions)")}
+        if "summary_text" not in existing_cols:
+            self._conn.execute("ALTER TABLE sessions ADD COLUMN summary_text TEXT")
+        if "summarized_through_turn" not in existing_cols:
+            self._conn.execute(
+                "ALTER TABLE sessions ADD COLUMN summarized_through_turn INTEGER NOT NULL DEFAULT 0"
+            )
+        self._conn.commit()
+
+    def _migrate_add_token_count_column(self) -> None:
+        existing_cols = {row[1] for row in self._conn.execute("PRAGMA table_info(messages)")}
+        if "token_count" not in existing_cols:
+            self._conn.execute(
+                "ALTER TABLE messages ADD COLUMN token_count INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def create_session(self) -> str:
@@ -156,7 +210,7 @@ class SQLiteStore:
             raise KeyError(session_id)
         rows = self._conn.execute(
             """
-            SELECT role, content FROM messages
+            SELECT role, content, token_count FROM messages
             WHERE session_id = ?
             ORDER BY turn_index
             """,
@@ -167,7 +221,10 @@ class SQLiteStore:
         # line, nothing knows SQLite exists; below it, nothing knows
         # Message exists. Same translation discipline as client.py does
         # for the Anthropic SDK.
-        return [Message(role=role, content=content) for role, content in rows]
+        return [
+            Message(role=role, content=content, token_count=token_count)
+            for role, content, token_count in rows
+        ]
 
     def append(self, session_id: str, *messages: Message) -> None:
         # next turn_index = current row count for this session
@@ -177,11 +234,11 @@ class SQLiteStore:
         with self._conn:
             self._conn.executemany(
                 """
-                INSERT INTO messages (session_id, turn_index, role, content)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO messages (session_id, turn_index, role, content, token_count)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 [
-                    (session_id, count + i, m.role, m.content)
+                    (session_id, count + i, m.role, m.content, m.token_count or 0)
                     for i, m in enumerate(messages)
                 ],
             )
@@ -189,15 +246,32 @@ class SQLiteStore:
         # user text into SQL. Message content is user-controlled input;
         # f-stringing it is a SQL injection.
 
+    def get_summary(self, session_id: str) -> tuple[str | None, int]:
+        row = self._conn.execute(
+            "SELECT summary_text, summarized_through_turn FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(session_id)
+        return row[0], row[1]
+
+    def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None:
+        # UPDATE, not INSERT — this is the mutable-cache half of the store.
+        # Compare with append(): messages only ever grow; this overwrites
+        # in place, because only the LATEST summary is ever useful.
+        with self._conn:
+            self._conn.execute(
+                "UPDATE sessions SET summary_text = ?, summarized_through_turn = ? WHERE id = ?",
+                (summary, summarized_through_turn, session_id),
+            )
+
 
 # ---------------------------------------------------------------------------
 # WHAT'S DELIBERATELY *NOT* HERE YET:
 #
 # 1. delete_session / list_sessions — trivial to add when a UI needs them.
-# 2. Token counts per message — the truncation step will want to know how
-#    big the history is without re-tokenizing; storing counts per row is
-#    the usual trick. Add the column when you build truncation.
-# 3. Migrations — schema changes on a live DB need a migration tool
-#    (alembic etc.). CREATE TABLE IF NOT EXISTS is fine until then.
-# 4. Connection pooling / real concurrency — comes with the HTTP server.
+# 2. A real migration TOOL (alembic etc.) — the hand-rolled
+#    PRAGMA table_info checks above work for one or two added columns,
+#    but won't scale to renamed/dropped columns or multi-step migrations.
+# 3. Connection pooling / real concurrency — comes with the HTTP server.
 # ---------------------------------------------------------------------------

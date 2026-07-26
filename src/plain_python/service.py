@@ -69,13 +69,40 @@ class ChatService:
 
         # 1.5 TRUNCATE — the seam noted in the module docstring below.
         #     Keeps the last N turns verbatim; folds anything older into a
-        #     one-paragraph summary prepended into the first kept message
-        #     (see truncation.py for why it's NOT put in the system prompt).
-        #     When the conversation is still shorter than the window, this
-        #     is just `history` unchanged.
-        recent_history = truncate_history(history, self._client, self._truncation_config)
+        #     rolling summary (cached in the store, updated incrementally)
+        #     prepended into the first kept message (see truncation.py for
+        #     why it's NOT put in the system prompt). When the conversation
+        #     is still shorter than the window, this is just `history`
+        #     unchanged.
+        recent_history = truncate_history(
+            session_id, history, self._client, self._store, self._truncation_config
+        )
 
         user_msg = Message(role="user", content=user_text)
+        # [LEARNING] count_tokens() here, not response.input_tokens later —
+        # see client.py for why input_tokens can't be reused per-message.
+        # This is a small extra API call (no generation), paid once per
+        # turn, so a future token-budget truncation trigger can sum stored
+        # counts instead of re-tokenizing the whole history each call.
+        #
+        # [LEARNING] Deliberately built with model=self._config.model and
+        # NO system prompt — two separate traps otherwise:
+        #   1. Passing no config at all (as an earlier version of this
+        #      line did) silently falls back to count_tokens()'s own
+        #      default model, which only matches self._config.model by
+        #      coincidence — change the conversation's model and token
+        #      counts quietly start being computed under the WRONG
+        #      tokenizer.
+        #   2. Passing self._config directly fixes (1) but reintroduces a
+        #      different bug: count_tokens() includes config.system when
+        #      present, so the user message's stored count would be
+        #      inflated by the ENTIRE system prompt's tokens — a shared
+        #      cost, re-charged to every single message.
+        # A stripped-down config (same model, no system) gets the
+        # marginal count for just this one message, under the tokenizer
+        # that will actually be used.
+        count_config = InferenceConfig(model=self._config.model)
+        user_msg.token_count = self._client.count_tokens([user_msg], count_config)
 
         # 2. COMPUTE — same infer() as always. Note: `recent_history +
         #    [user_msg]` builds the prompt WITHOUT mutating anything.
@@ -91,7 +118,13 @@ class ChatService:
         #    store still holds a clean, consistent history. Reordering
         #    operations so failure needs no cleanup beats writing cleanup
         #    code — a pattern worth carrying everywhere.
-        self._store.append(session_id, user_msg, Message(role="assistant", content=response.text))
+        # [LEARNING] response.output_tokens IS safe to reuse directly here
+        # (unlike input_tokens) — it's exactly the token count of the text
+        # just generated, nothing cumulative about it.
+        assistant_msg = Message(
+            role="assistant", content=response.text, token_count=response.output_tokens
+        )
+        self._store.append(session_id, user_msg, assistant_msg)
 
         return response
 

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from .client import LLMClient
 from .models import InferenceConfig, Message
+from .storage import ConversationStore
 
 
 # ---------------------------------------------------------------------------
@@ -23,6 +24,16 @@ from .models import InferenceConfig, Message
 # "Turn" here = one (user, assistant) pair. The store only ever appends
 # complete pairs (see ChatService.send), so `history` loaded from it is
 # always an even-length list — len(history) // 2 is a safe turn count.
+#
+# [LEARNING] Why ROLLING, not recompute-from-scratch:
+# The window slides forward one turn at a time, so on every call past the
+# threshold, exactly ONE turn newly falls out of the window. Naively,
+# you'd re-summarize the entire old segment every call — turn 20
+# re-reads turns 1-16, turn 21 re-reads turns 1-17, and so on: O(n) work
+# repeated every turn. Instead, the store remembers (summary_text,
+# summarized_through_turn) from last time, and each call folds in ONLY
+# the one turn that just aged out: new_summary = fold(old_summary,
+# newly_aged_out_turn). O(1) LLM work per turn instead of O(n).
 # ---------------------------------------------------------------------------
 
 
@@ -32,35 +43,40 @@ class TruncationConfig:
 
 
 _SUMMARY_SYSTEM_PROMPT = (
-    "Summarize the conversation transcript given below. Preserve names, "
-    "facts, and decisions the assistant will need to stay consistent in "
-    "later turns. Be concise: a short paragraph, not a transcript."
+    "You maintain a running summary of an ongoing conversation. You may "
+    "be given an existing summary plus new messages that happened since "
+    "it was written — merge them into ONE updated summary. Preserve "
+    "names, facts, and decisions the assistant will need to stay "
+    "consistent in later turns. Be concise: a short paragraph, not a "
+    "transcript."
 )
 
 
 def truncate_history(
+    session_id: str,
     history: list[Message],
     client: LLMClient,
+    store: ConversationStore,
     config: TruncationConfig | None = None,
 ) -> list[Message]:
     """Return the history that should actually be sent to the model.
 
     Below the window: `history` unchanged. Above it: the last N turns,
-    with the summary of everything older PREPENDED INTO THE FIRST message's
-    content — not placed in the system prompt, and not added as a new
-    Message.
+    with a rolling summary of everything older PREPENDED INTO THE FIRST
+    message's content — not placed in the system prompt (see below), and
+    not added as a new Message (see below).
 
     [LEARNING] Why not the system prompt:
     `system` is the one part of a request that's supposed to stay
     perfectly stable across an entire conversation — that's what makes it
     cheap to cover with a single prompt-cache breakpoint for the whole
-    session. The summary changes on every call past the window (the split
-    boundary advances by one turn each time), so putting it in `system`
-    would make the ONE block that should never change churn every turn —
-    the opposite of what caching wants. Keeping the summary inside
-    `messages` costs nothing extra on that front: this array was already
-    guaranteed to change turn-to-turn (it's a sliding window, not an
-    append-only log), so it was never a stable cache prefix to begin with.
+    session. The summary changes every time the window advances, so
+    putting it in `system` would make the ONE block that should never
+    change churn instead — the opposite of what caching wants. Keeping
+    it inside `messages` costs nothing extra on that front: this array
+    was already guaranteed to change turn-to-turn (it's a sliding window,
+    not an append-only log), so it was never a stable cache prefix to
+    begin with.
 
     [LEARNING] Why prepended INTO an existing message instead of a new one:
     Anthropic's API requires messages to strictly alternate user/assistant,
@@ -77,30 +93,50 @@ def truncate_history(
     if total_turns <= config.keep_last_n_turns:
         return history
 
-    split_at = (total_turns - config.keep_last_n_turns) * 2
-    old_turns, recent_turns = history[:split_at], history[split_at:]
+    # How many turns should be *represented in the summary* as of this call.
+    turns_to_summarize = total_turns - config.keep_last_n_turns
+    existing_summary, summarized_through = store.get_summary(session_id)
 
-    # [LEARNING] old_turns is flattened into ONE user message rather than
-    # replayed as multi-turn messages. Replaying them would end on an
-    # assistant message (old_turns is turn-pairs), and the API would then
-    # try to CONTINUE that assistant turn instead of producing a fresh
-    # summary. A single user message asking "summarize this text" always
-    # ends on user, so the model responds with exactly the summary we want.
-    transcript = "\n".join(f"{m.role}: {m.content}" for m in old_turns)
-    summary_request = Message(
-        role="user",
-        content=f"Conversation to summarize:\n\n{transcript}",
-    )
-    summary_response = client.infer_create(
-        [summary_request],
-        InferenceConfig(system=_SUMMARY_SYSTEM_PROMPT, max_tokens=512),
-    )
+    if turns_to_summarize > summarized_through:
+        # [LEARNING] Only the DELTA — the turn(s) that aged out since the
+        # last call — gets read here, not the whole old segment. On the
+        # common path (window advances by exactly one turn per call) this
+        # slice is a single turn: 2 messages, not 2*n.
+        newly_aged_out = history[summarized_through * 2 : turns_to_summarize * 2]
+        transcript = "\n".join(f"{m.role}: {m.content}" for m in newly_aged_out)
 
+        if existing_summary:
+            prompt_content = (
+                f"Existing summary:\n{existing_summary}\n\n"
+                f"New messages to fold in:\n{transcript}"
+            )
+        else:
+            prompt_content = f"Conversation to summarize:\n\n{transcript}"
+
+        # [LEARNING] Sent as ONE user message, not replayed as multi-turn
+        # messages. Replaying would end on an assistant message (turn-pairs
+        # end that way), and the API would try to CONTINUE that assistant
+        # turn instead of producing a fresh summary. A single user message
+        # always ends on user, so the model replies with exactly the
+        # updated summary we want.
+        summary_response = client.infer_create(
+            [Message(role="user", content=prompt_content)],
+            InferenceConfig(system=_SUMMARY_SYSTEM_PROMPT, max_tokens=512),
+        )
+        summary_text = summary_response.text
+        store.set_summary(session_id, summary_text, turns_to_summarize)
+    else:
+        # Window hasn't advanced since last call (shouldn't normally
+        # happen within one send(), but keeps the function correct if
+        # called more than once against the same state).
+        summary_text = existing_summary
+
+    recent_turns = history[turns_to_summarize * 2 :]
     first_recent = recent_turns[0]
     prefixed_first = Message(
         role=first_recent.role,
         content=(
-            f"Summary of earlier conversation:\n{summary_response.text}"
+            f"Summary of earlier conversation:\n{summary_text}"
             f"\n\n---\n\n{first_recent.content}"
         ),
     )
@@ -110,13 +146,16 @@ def truncate_history(
 # ---------------------------------------------------------------------------
 # WHAT'S DELIBERATELY *NOT* HERE YET:
 #
-# 1. Caching the summary. Every call beyond the window re-summarizes the
-#    ENTIRE old segment from scratch — turn 20 re-summarizes turns 1-16,
-#    turn 21 re-summarizes turns 1-17, and so on. That's an extra LLM call
-#    per turn, of growing size. The production fix: persist "summary text"
-#    + "summarized through turn X" in the store, and only ask the model to
-#    fold in the ONE newly-aged-out turn each time, instead of redoing the
-#    whole prefix.
-# 2. A token-budget trigger instead of a fixed turn count — real systems
+# 1. A token-budget trigger instead of a fixed turn count — real systems
 #    truncate based on estimated tokens remaining, not "4 turns" flatly.
+# 2. Concurrency safety for get_summary/set_summary — two simultaneous
+#    send() calls on the same session could race (both read the same
+#    summarized_through, both write). Same caveat as append() in
+#    storage.py: fine for one process, needs a lock or DB transaction
+#    once the HTTP server makes concurrent calls real.
+# 3. Request-level audit logging. The exact prefixed prompt sent to the
+#    model (summary + recent turns) is still never persisted anywhere —
+#    only the clean original messages and the rolling summary are. If
+#    you need to reconstruct "what exact bytes did we send on turn 12,"
+#    that's a separate, append-only log this deliberately doesn't add.
 # ---------------------------------------------------------------------------
