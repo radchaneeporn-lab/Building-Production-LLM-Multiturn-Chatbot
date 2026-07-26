@@ -3,6 +3,7 @@ from __future__ import annotations
 from .client import LLMClient
 from .models import InferenceConfig, InferenceResponse, Message
 from .storage import ConversationStore
+from .truncation import TruncationConfig, truncate_history
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ class ChatService:
         client: LLMClient,
         store: ConversationStore,
         config: InferenceConfig | None = None,
+        truncation_config: TruncationConfig | None = None,
     ):
         # [LEARNING] All three collaborators are INJECTED, not constructed
         # here. The service doesn't know or care which store it got —
@@ -50,6 +52,7 @@ class ChatService:
         self._client = client
         self._store = store
         self._config = config or InferenceConfig()
+        self._truncation_config = truncation_config or TruncationConfig()
 
     def create_session(self) -> str:
         """Start a new conversation; return its handle."""
@@ -64,12 +67,20 @@ class ChatService:
         #    is the single source of truth.)
         history = self._store.load(session_id)
 
+        # 1.5 TRUNCATE — the seam noted in the module docstring below.
+        #     Keeps the last N turns verbatim; folds anything older into a
+        #     one-paragraph summary prepended into the first kept message
+        #     (see truncation.py for why it's NOT put in the system prompt).
+        #     When the conversation is still shorter than the window, this
+        #     is just `history` unchanged.
+        recent_history = truncate_history(history, self._client, self._truncation_config)
+
         user_msg = Message(role="user", content=user_text)
 
-        # 2. COMPUTE — same infer() as always. Note: `history + [user_msg]`
-        #    builds the prompt WITHOUT mutating anything. Nothing has been
-        #    persisted yet.
-        response = self._client.infer(history + [user_msg], self._config)
+        # 2. COMPUTE — same infer() as always. Note: `recent_history +
+        #    [user_msg]` builds the prompt WITHOUT mutating anything.
+        #    Nothing has been persisted yet.
+        response = self._client.infer(recent_history + [user_msg], self._config)
 
         # 3. APPEND — persist the completed pair, only now that infer()
         #    succeeded.
@@ -95,8 +106,10 @@ class ChatService:
 # ---------------------------------------------------------------------------
 # WHERE THE REMAINING PRODUCTION STEPS PLUG IN — all inside send():
 #
-#   truncation:   between LOAD and COMPUTE — trim/summarize `history`
-#                 before building the prompt. One function call, one seam.
+#   truncation:   DONE — see step 1.5 above and truncation.py. Note it only
+#                 affects what's SENT to the model; `self._store.append()`
+#                 below still persists the full, untruncated pair. The store
+#                 is the permanent record; truncation is a read-time view.
 #   caching:      inside COMPUTE — cache_control on the prompt the client
 #                 builds. The service doesn't change.
 #   HTTP server:  a thin handler that parses {session_id, text} from a
