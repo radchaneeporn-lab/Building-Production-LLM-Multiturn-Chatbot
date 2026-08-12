@@ -43,5 +43,33 @@ question, not a mechanical port, and it should get its own record.
 history and both append — see
 [0014](0014-concurrency-safety-for-the-sqlite-store.md).
 
+**What I know:**
+- That operation ordering can eliminate a rollback path rather than handle it.
+- That holding a database transaction across a slow third-party call is a bad
+  idea.
+- That building a new list instead of mutating one is what makes the rollback
+  unnecessary.
+
+**What I don't know yet → fundamentals to learn:**
+- **Failure modes, precisely.** I treat "`infer()` raises" as one case. It is
+  several with different correct responses: a 4xx (my bug — do not retry), a
+  429 (retry with backoff), a 5xx (retry), a timeout (**unknown outcome** —
+  the call may have succeeded and I may be charged). The timeout case is the
+  interesting one and I currently handle none of them explicitly.
+- **Delivery semantics.** At-most-once, at-least-once, exactly-once — and why
+  exactly-once is generally unachievable without idempotency at the receiver.
+  This is the theory under the retry question in 0002.
+- **Two-system consistency.** A turn writes to a database *and* calls an
+  external paid API. There is no transaction spanning both. If the API call
+  succeeds and the database write then fails, I have paid for a response the
+  user never sees and the transcript never records. Learning goal: the outbox
+  pattern, sagas, compensating actions — the standard vocabulary for "I cannot
+  make two systems atomic."
+- **Idempotency keys.** The concrete tool for making a retried request safe.
+  Same discipline I already recognised in tool-call retries, applied here.
+- **Partial failure in streaming.** Named in `Reverses when:` above and
+  genuinely open: what is the correct persistence behaviour when the user has
+  already seen half an answer?
+
 **Pillar pressure:** Reliability. Costs nothing — it is purely a matter of
 statement order.

@@ -38,6 +38,32 @@ primary path for `/chat`, and the open question in `client.py` note (3) —
 how to report usage after a stream — becomes a real design task rather than a
 footnote.
 
+**What I know:**
+- That arriving events keep a long-lived connection from looking idle.
+- That a transport choice can be hidden entirely behind a stable return type,
+  and that incremental delivery cannot be.
+- That the right variant depends on output length, not on preference.
+
+**What I don't know yet → fundamentals to learn:**
+- **Where timeouts actually live.** I wrote "intermediaries kill it as stalled"
+  without knowing which intermediary, or what the number is. There are several
+  independent clocks on one request: client read timeout, reverse-proxy idle
+  timeout, load-balancer idle timeout, server request timeout. Any one can fire.
+  Learning goal: name each one, know its typical default, know which produces
+  which error.
+- **What SSE actually is.** Server-Sent Events is a one-directional HTTP
+  response held open, sent as `text/event-stream` with `data:` lines. I use it
+  through the SDK without having seen the raw protocol. Worth reading one raw
+  stream to make it concrete.
+- **SSE vs. WebSocket vs. long polling.** Three ways to push data to a client.
+  When each is appropriate — and why SSE is usually the right one for chat
+  output (one direction, plain HTTP, auto-reconnect).
+- **Buffering.** A proxy that buffers a response defeats streaming completely:
+  the client sees nothing until the whole body arrives. This is a classic
+  deployment surprise and it will apply to my future streaming endpoint.
+- **TCP keepalive vs. application-level heartbeats.** Different layers, both
+  called "keepalive." Which one the SSE events are actually acting as.
+
 **Pillar pressure:** Reliability (timeout resistance) over simplicity. Note it
 buys *no* latency improvement for the user: `infer()` still returns only when
 generation completes. Perceived latency remains a separate, unaddressed problem.

@@ -25,7 +25,7 @@ survives from them is names, facts, and decisions, not wording.
 The summary is **rolling, not recomputed**. The store keeps
 `(summary_text, summarized_through_turn)`, and each call folds in only the turn
 that just aged out. Recomputing from scratch would re-read the whole old segment
-every single turn — O(n) LLM work per turn, and therefore O(n²) over a
+every single turn — O(n) LLM work per turn, and therefore O(n^2) over a
 conversation, which is the exact cost curve this decision exists to flatten.
 
 **Rejected:**
@@ -47,6 +47,38 @@ disk space that costs almost nothing — a bad trade in any direction.
   pre-wired and not yet built.
 - Prompt caching is introduced, which changes the arithmetic: cached prefix
   tokens are far cheaper, so aggressive truncation may stop paying for itself.
+
+**What I know:**
+- Why input cost grows quadratically over a conversation.
+- Why an incremental fold beats recomputation, and the complexity argument for
+  it.
+- That the stored record and the sent prompt are different things, and only one
+  of them should be lossy.
+
+**What I don't know yet → fundamentals to learn:**
+- **Cost attribution.** I know cost grows. I cannot answer "what did user X
+  cost last month" or "which conversation is most expensive," because usage is
+  returned per call and never aggregated anywhere. Learning goal: unit
+  economics — define the unit (a conversation? a user-month?), then instrument
+  to measure it. Without this, the product cannot be priced or capped.
+- **Quality measurement / evaluation.** This is the sharpest gap. Truncation
+  degrades quality by design, and I have **no way to detect it**. If the
+  4-turn window is too aggressive, nothing fails — answers just quietly get
+  worse. Learning goal: build a small eval set and score against it, so
+  context-management changes have a measurable effect rather than a vibe.
+  For a system with a non-deterministic component, evaluation *is* the
+  regression test.
+- **Prompt caching mechanics.** Referenced in 0011 and in the code comments as
+  a reason for design choices, but not implemented and not fully understood:
+  what makes a prefix cacheable, how breakpoints work, how long a cache lives,
+  and how it is billed.
+- **Tokenisation.** `count_tokens()` is treated as an oracle. Knowing roughly
+  how BPE works — and why token count is not proportional to character count,
+  especially for non-English text and code — would make budget reasoning less
+  superstitious.
+- **Caching as a general pattern.** Prompt caching is one instance. The general
+  concepts — cache key design, TTL, invalidation, staleness, hit rate — apply
+  again at the session-cache layer later.
 
 **Pillar pressure:** Cost optimisation, primarily — this is a business
 constraint (margin per conversation) expressed as a policy in the service layer.

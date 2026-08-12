@@ -40,4 +40,37 @@ authentication at all — it is an open, unmetered proxy to a paid model. That i
 acceptable on localhost and unacceptable the moment it has a public URL. This
 record does not solve it; it should not be mistaken for solving it.
 
+**What I know:**
+- That enumerable identifiers are an access-control vulnerability (IDOR).
+- That unguessability is not authorisation.
+- That random primary keys have an index-locality cost at scale.
+
+**What I don't know yet → fundamentals to learn:**
+This is the thinnest-covered pillar in the whole log — one record out of
+fourteen mentions security. That is the honest state of the project.
+
+- **Authentication vs. authorisation.** Two different questions: *who are you*
+  and *what may you do*. My system answers neither. Learning goal: be able to
+  state which layer answers each, and why a session ID conflates them today.
+- **How a request proves identity.** The options and their trade space: opaque
+  session token looked up server-side, signed token (JWT) validated without a
+  lookup, API key. Which is revocable, which scales, which leaks what.
+- **Rate limiting and quotas.** `/chat` can be called without limit, and every
+  call costs money. Learning goal: token bucket vs. leaky bucket vs. fixed
+  window, per-user vs. per-IP, and where the limit is enforced.
+- **Secrets handling.** The API key comes from `.env` via `dotenv`. That is
+  correct locally and does not survive deployment: a container needs the secret
+  injected at runtime, never baked into the image or committed. Learning goal:
+  environment injection, secret stores, and rotation.
+- **Transport security and data at rest.** HTTPS terminates somewhere — where,
+  and is the hop after it encrypted? Conversation content is user data sitting
+  unencrypted in a file. Learning goal: encryption in transit vs. at rest, and
+  what each actually protects against.
+- **Least privilege and blast radius.** If one component is compromised, what
+  else does it reach? Currently everything runs as one process with one
+  credential. This is the framing question behind most security design.
+- **Data retention.** Conversations are stored forever with no deletion path.
+  Once real users exist, that is a policy question with legal weight, not just
+  a storage cost.
+
 **Pillar pressure:** Security. Cost is nil.

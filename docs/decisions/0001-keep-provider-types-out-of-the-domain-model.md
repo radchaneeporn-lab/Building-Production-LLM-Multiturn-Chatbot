@@ -34,5 +34,26 @@ so much of the SDK surface (tool blocks, thinking blocks, citations) that the
 mapping layer becomes the bulk of the code — at which point the answer is a
 richer content model, not the removal of the seam.
 
+**What I know:**
+- Why an anti-corruption layer exists: a volatile external type must not become
+  a transitive dependency of stable internal code.
+- How to translate in both directions at a single boundary.
+- That `token_count` can ride on the domain type without leaking to the wire.
+
+**What I don't know yet → fundamentals to learn:**
+- **Schema evolution / versioning.** `Message` is currently `role + content: str`.
+  Real messages carry content *blocks* — text, images, tool calls, tool results.
+  When that change lands, every stored row written under the old shape still
+  exists. How do you change a data shape that already has persisted instances?
+  (Keywords: backward/forward compatibility, additive-only changes, schema
+  version fields.)
+- **Serialisation boundaries.** `to_api_dict()` handles one direction to one
+  consumer. A real system serialises the same type to a database, an HTTP
+  response, a log line, and a message queue — each with different rules about
+  what's allowed to leak. What's the discipline for keeping those separate?
+- **Structured content modelling.** Once `content` stops being a string, the
+  question of how to model a discriminated union of block types becomes real.
+  This is where Pydantic earns its keep over dataclasses.
+
 **Pillar pressure:** Operational excellence (changeability, testability).
 Costs a little up-front effort; buys freedom for every layer above.

@@ -37,10 +37,43 @@ things that genuinely are process-lifetime.
 
 **Related gap:** startup is where the "fail fast on configuration" discipline
 should live. `LLMClient.__init__` already validates the API key, so a missing
-key kills the process at boot rather than failing the first request — which is
-the behaviour a container platform's health check is designed to catch. Note
-that `/health` currently reports only that the process is up; it does not check
-that the database is reachable or that the provider is responding.
+key kills the process at boot rather than failing the first request. Note that
+`/health` currently reports only that the process is up; it does not check that
+the database is reachable or that the provider is responding.
+
+**What I know:**
+- The distinction between process-lifetime and request-scoped dependencies.
+- That a stateless service can be safely shared across concurrent requests.
+- That startup is the right place to fail on bad configuration.
+
+**What I don't know yet → fundamentals to learn:**
+- **What is actually running my code.** I write route functions; something else
+  runs them. Learning goal: the server model — an ASGI application, a server
+  process, an event loop, a thread pool for sync handlers, and multiple worker
+  processes. Crucially: **`lifespan` runs once per worker process, not once per
+  machine.** With four workers I have four `ChatService` instances and four
+  SQLite connections to the same file. I did not know that when I wrote this,
+  and it changes 0014.
+- **`def` vs. `async def`.** I chose `def` and wrote down the reason. What I
+  have not learned is what actually happens: sync handlers run in a bounded
+  thread pool, so the pool size becomes a concurrency ceiling. Blocking inside
+  an `async def` handler blocks the entire event loop and every other request
+  with it. This is the single most consequential thing to understand about
+  FastAPI, and my code depends on it already.
+- **Graceful shutdown.** The code after `yield` runs at shutdown — but only if
+  the process is asked politely. Learning goal: SIGTERM vs. SIGKILL, drain
+  periods, and what happens to a request that is mid-inference when a deploy
+  starts. Relevant immediately: an LLM call can take 30 seconds, which is longer
+  than many default drain windows.
+- **Liveness vs. readiness.** `/health` conflates them. *Liveness* = the process
+  is alive, restart me if not. *Readiness* = I can actually serve traffic
+  (dependencies reachable), send me requests. A readiness check that does not
+  test dependencies will happily route traffic to a replica whose database is
+  gone.
+- **Twelve-factor configuration.** Config comes from `.env` via `dotenv`, which
+  does not exist in a container. The general principle — configuration lives in
+  the environment, not in the image — is what makes the same artifact runnable
+  in dev and production.
 
 **Pillar pressure:** Performance efficiency (no per-request construction cost)
 and operational excellence (clean startup/shutdown hooks, which matter as soon

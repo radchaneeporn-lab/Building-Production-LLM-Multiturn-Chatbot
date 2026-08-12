@@ -40,6 +40,31 @@ of 2N, and a stale caller can never shrink a conversation. `get_summary`/
 regenerated from the messages if lost. Keeping them on separate method pairs
 makes that distinction visible in the type, not just in a comment.
 
+**What I know:**
+- Structural vs. nominal typing, and why `Protocol` decouples adapters from
+  each other.
+- Dependency injection at a composition root.
+- That error behaviour is part of an interface contract, not an implementation
+  detail.
+- The difference between an append-only record and a regenerable cache.
+
+**What I don't know yet → fundamentals to learn:**
+- **Testing against a seam.** The seam exists specifically to make testing
+  possible, and there are currently **no tests in this repo**. That is the
+  largest gap in the project. Learning goal: fakes vs. mocks vs. stubs (and why
+  a real `InMemoryStore` is usually better than a mock), and how to run one test
+  suite against both implementations to prove they behave identically —
+  the technique that would catch a `KeyError` mismatch automatically.
+- **Interface evolution.** I have already added two methods (`get_summary`,
+  `set_summary`) to a Protocol with two implementations. With ten
+  implementations, or one owned by someone else, that is a breaking change.
+  How interfaces version: additive-only rules, default implementations,
+  splitting a fat interface into narrow ones.
+- **Where seams should *not* go.** Every abstraction has a cost. I have one
+  seam and it is clearly justified; the general skill is recognising when a
+  seam is speculative — an interface with exactly one implementation and no
+  foreseeable second one is usually premature.
+
 **Pillar pressure:** Operational excellence (testability, changeability). The
 cost is one extra indirection; the benefit is that 0007 becomes a one-line
 change at the composition root.

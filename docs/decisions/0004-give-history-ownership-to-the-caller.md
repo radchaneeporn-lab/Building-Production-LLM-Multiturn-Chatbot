@@ -32,5 +32,29 @@ constraints became binding at the HTTP step. The file is retained as the
 in-memory reference implementation and as the readable version of the
 append-user / infer / append-assistant loop.
 
+**What I know:**
+- That the LLM API is stateless and history is re-sent by the client every turn.
+- That shared mutable state on an infrastructure object becomes cross-user
+  data leakage the moment there is more than one user.
+- That per-conversation state must be keyed by conversation.
+
+**What I don't know yet → fundamentals to learn:**
+- **What "shared" actually means in Python.** I asserted that one `LLMClient`
+  instance would interleave conversations. That is true — but *why* depends on
+  the concurrency model, and I have not learned the three:
+  - **Threads:** one process, shared memory, true interleaving. The GIL means
+    only one thread runs Python bytecode at a time, but that does not make
+    multi-step operations atomic (see 0014).
+  - **Async / event loop:** one thread, cooperative switching only at `await`
+    points. Different interleaving hazards, fewer of them.
+  - **Processes / workers:** separate memory. A module-level global is *not*
+    shared between them, which is why in-process state fails silently at 2+
+    workers rather than loudly.
+  Knowing which one FastAPI is using for my code (both, depending on `def` vs.
+  `async def`) is the prerequisite for reasoning about any of this.
+- **Race conditions and atomicity.** "Two things happen at once" needs to become
+  precise: what an atomic operation is, what a critical section is, and why
+  read-then-write is the classic unsafe pattern.
+
 **Pillar pressure:** Security (isolation between users) was the decisive one,
 ahead of any performance or elegance argument.

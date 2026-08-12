@@ -43,5 +43,25 @@ that results, which is a good illustration of why the log exists at all: the
 final line looks arbitrary, and reconstructing the reasoning from scratch would
 take an afternoon.
 
+**What I know:**
+- That a cache prefix must be stable to be worth anything, and that putting a
+  changing value into a stable block destroys the benefit.
+- The alternation rule of the messages array and why it forced the placement.
+
+**What I don't know yet → fundamentals to learn:**
+- **Cache key design.** The general skill behind this record: what goes in a
+  cache key, why a key that varies per request has a 0% hit rate, and how to
+  split stable from volatile parts of a payload. This applies far beyond prompt
+  caching — it is the same reasoning for HTTP caching and CDN behaviour.
+- **Cache invalidation and TTL.** What happens when the cached thing becomes
+  wrong, and how a system notices. Stale reads are the classic cost of caching.
+- **Hit rate as a metric.** I reason about caching qualitatively ("this would
+  be a miss"). The quantitative version — measure hit rate, compute the cost
+  delta — is what turns this from an argument into a decision. I currently
+  measure nothing.
+- **Layered caching.** Prompt cache at the provider, response cache in the app,
+  session cache in memory or Redis. Three different caches with three different
+  invalidation stories. Worth mapping before adding the second one.
+
 **Pillar pressure:** Cost optimisation (preserves cache viability) and
 reliability (stays inside the format contract).
