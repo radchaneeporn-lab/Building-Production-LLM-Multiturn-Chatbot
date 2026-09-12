@@ -4,8 +4,8 @@ import os
 
 from dotenv import load_dotenv
 
-from src.plain_python.client import LLMClient
-from src.plain_python.models import InferenceConfig, Message
+from src.chatbot.client import LLMClient
+from src.chatbot.models import InferenceConfig, Message
 
 load_dotenv()  # reads ANTHROPIC_API_KEY from .env if present
 

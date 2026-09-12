@@ -27,9 +27,9 @@ logic barely changes. That seam is the point.
 
 from dotenv import load_dotenv
 
-from src.plain_python.client import LLMClient
-from src.plain_python.conversation import Conversation
-from src.plain_python.models import InferenceConfig
+from src.chatbot.client import LLMClient
+from src.chatbot.conversation import Conversation
+from src.chatbot.models import InferenceConfig
 
 load_dotenv()  # reads ANTHROPIC_API_KEY from .env if present
 

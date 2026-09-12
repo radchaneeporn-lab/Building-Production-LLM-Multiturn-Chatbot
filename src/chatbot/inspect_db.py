@@ -1,8 +1,8 @@
-"""Quick read-only peek at conversations.db. Run: python -m src.plain_python.inspect_db"""
-# python -m src.plain_python.inspect_db
+"""Quick read-only peek at conversations.db. Run: python -m src.chatbot.inspect_db"""
+# python -m src.chatbot.inspect_db
 #   The -m flag runs it as a module using the package's dotted
 #   path, which is why it must be run from root (not python
-#   src/plain_python/inspect_db.py, which would break the
+#   src/chatbot/inspect_db.py, which would break the
 #   relative import context if the file ever imports siblings
 #   via .)
 

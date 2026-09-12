@@ -18,15 +18,15 @@ from an object to a string. A string can go in a cookie, a URL, a JSON
 body. That's what makes the next step (HTTP server) a thin wrapper
 instead of a rewrite.
 """
-
+# this is step of 	"Learned persistence" + "Learned session IDs" — but still one user at a keyboard
 import sys
 
 from dotenv import load_dotenv
 
-from src.plain_python.client import LLMClient
-from src.plain_python.models import InferenceConfig
-from src.plain_python.service import ChatService
-from src.plain_python.storage import SQLiteStore
+from src.chatbot.client import LLMClient
+from src.chatbot.models import InferenceConfig
+from src.chatbot.service import ChatService
+from src.chatbot.storage import SQLiteStore
 
 load_dotenv()
 
@@ -50,6 +50,7 @@ def main() -> None:
 
     # Resume if an ID was given, else create — the caller's only "state"
     # is this string.
+    # learn about sys in this file : playground\scratch.py
     if len(sys.argv) > 1:
         session_id = sys.argv[1]
         if not service.session_exists(session_id):

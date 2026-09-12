@@ -6,7 +6,8 @@ from .models import InferenceConfig, InferenceResponse, Message
 
 # ---------------------------------------------------------------------------
 # LEARNING NOTE — the single most important fact about multi-turn:
-#
+# This is the step of "Started sending the whole conversation back every turn"
+# 
 #   THE API IS STATELESS. There is no "session" on Anthropic's side.
 #   Every call to /v1/messages is a brand-new request; the model only
 #   "remembers" the conversation because WE resend the entire history

@@ -49,6 +49,7 @@ class ChatService:
         # InMemoryStore in tests, SQLiteStore in the demo, Postgres later.
         # "Depend on the interface, receive the implementation" is what
         # makes each layer testable in isolation.
+        
         self._client = client
         self._store = store
         self._config = config or InferenceConfig()

@@ -17,9 +17,11 @@ The composition root (client/store/config/service) is IDENTICAL to
 main_service.py's — this is exactly the claim service.py's own trailing
 comment made: "HTTP server: a thin handler that parses {session_id, text}
 ... calls service.send(). The service is already stateless, so it's
-server-ready as-is." Nothing in src/plain_python/ changed to make this
+server-ready as-is." Nothing in src/chatbot/ changed to make this
 file possible.
 """
+# this is step of "Put it behind an HTTP API, so that others can use it, not just in my notebook"
+# anything that speaks HTTP can now be your client — a curl command, a Next.js frontend, a mobile app — and none of them need to be Python or live in your process.
 
 from contextlib import asynccontextmanager
 
@@ -27,10 +29,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from src.plain_python.client import LLMClient
-from src.plain_python.models import InferenceConfig
-from src.plain_python.service import ChatService
-from src.plain_python.storage import SQLiteStore
+from src.chatbot.client import LLMClient
+from src.chatbot.models import InferenceConfig
+from src.chatbot.service import ChatService
+from src.chatbot.storage import SQLiteStore
 
 # ---------------------------------------------------------------------------
 # LEARNING NOTE — the FastAPI mental model, in one pass:

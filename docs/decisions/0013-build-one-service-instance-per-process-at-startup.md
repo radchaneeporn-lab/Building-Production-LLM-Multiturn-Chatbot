@@ -21,7 +21,7 @@ precisely because of 0005 — the service holds capabilities, not conversation
 state, so there is no shared mutable state to interleave. The composition root
 in `main_api.py` is line-for-line the same as `main_service.py`'s, which is the
 concrete evidence that the HTTP step required no change inside
-`src/plain_python/`.
+`src/chatbot/`.
 
 **Rejected:**
 (1) opens a SQLite connection and constructs an SDK client on every request —
