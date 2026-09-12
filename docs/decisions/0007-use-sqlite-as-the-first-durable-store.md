@@ -1,3 +1,4 @@
+
 # 0007: Use SQLite as the first durable store
 
 **Date:** 2026-08-12 (recorded retroactively)

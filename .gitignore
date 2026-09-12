@@ -17,3 +17,4 @@ env/
 # runtime data
 conversations.db
 src/chatbot/conversations.db
+*.log
