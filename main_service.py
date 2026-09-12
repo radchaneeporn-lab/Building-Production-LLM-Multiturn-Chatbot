@@ -19,6 +19,7 @@ body. That's what makes the next step (HTTP server) a thin wrapper
 instead of a rewrite.
 """
 # this is step of 	"Learned persistence" + "Learned session IDs" — but still one user at a keyboard
+import os
 import sys
 
 from dotenv import load_dotenv
@@ -39,7 +40,7 @@ def main() -> None:
     # down works against interfaces. Swap SQLiteStore() for
     # InMemoryStore() here and the whole app still runs — one-line change.
     client = LLMClient()
-    store = SQLiteStore("conversations.db")
+    store = SQLiteStore(os.environ.get("DB_PATH", "conversations.db"))
     config = InferenceConfig(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,

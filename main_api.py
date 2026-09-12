@@ -23,6 +23,7 @@ file possible.
 # this is step of "Put it behind an HTTP API, so that others can use it, not just in my notebook"
 # anything that speaks HTTP can now be your client — a curl command, a Next.js frontend, a mobile app — and none of them need to be Python or live in your process.
 
+import os
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
@@ -99,7 +100,12 @@ async def lifespan(_app: FastAPI):
     # per-request construction cost and no shared-mutable-state risk from
     # reusing it.
     client = LLMClient()
-    store = SQLiteStore("conversations.db")
+    # [LEARNING] DB_PATH is env-configurable (not just hardcoded) so a
+    # container can point it at a mounted volume — e.g. /app/data/conversations.db
+    # — instead of the image's writable layer, which is thrown away on
+    # every redeploy/restart. See ADR 0007's "reverses when" clause: this
+    # is exactly the ephemeral-disk trigger it warned about.
+    store = SQLiteStore(os.environ.get("DB_PATH", "conversations.db"))
     config = InferenceConfig(
         model="claude-haiku-4-5-20251001",
         max_tokens=1024,

@@ -1,0 +1,28 @@
+.git/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# secrets — passed at runtime via env/env_file, never baked into the image
+.env
+
+# runtime data — never ship a stale db or log inside the image
+*.db
+*.log
+
+# not needed at runtime (README.md IS needed — pyproject.toml's readme= field
+# makes `pip install .` fail without it)
+docs/
+playground/
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# entry points this image doesn't run (kept for reference/learning only)
+main.py
+main_plain.py
+main_multiturn.py
+main_service.py

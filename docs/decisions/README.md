@@ -100,6 +100,7 @@ themselves.
 | [0012](0012-persist-only-after-inference-succeeds.md) | Persist only after inference succeeds | Accepted |
 | [0013](0013-build-one-service-instance-per-process-at-startup.md) | Build one service instance per process at startup | Accepted |
 | [0014](0014-concurrency-safety-for-the-sqlite-store.md) | Concurrency safety for the SQLite store | **Open** |
+| [0015](0015-containerize-with-docker-keep-sqlite-on-a-named-volume.md) | Containerize with Docker; keep SQLite on a named volume | Accepted |
 
 ---
 
