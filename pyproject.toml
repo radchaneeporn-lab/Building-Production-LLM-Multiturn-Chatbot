@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-multiturn-chatbot"
+version = "0.1.0"
+description = "Production-shaped agentic multi-turn chatbot, built up in learning steps"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.40.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
