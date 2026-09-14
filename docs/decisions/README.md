@@ -109,7 +109,7 @@ themselves.
 
 0018 and 0019 both carry a **Postscript** recording what changed from theory to
 fact once the thing was actually deployed. The steps themselves are not a
-decision and live separately, in [`../deploy-railway.md`](../deploy-railway.md).
+decision and live separately, in [`../deploy-railway.md`](deploy-railway.md).
 
 ---
 

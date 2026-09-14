@@ -12,7 +12,7 @@ step could be moved somewhere else, it's in the wrong place.
 | Steps | 59, in 9 phases |
 | Span | `main_plain.py` → a public URL |
 | Records | ADR 0001 → 0020 |
-| Companion | [`decisions/README.md`](decisions/README.md) |
+| Companion | [`decisions/README.md`](README.md) |
 
 ---
 

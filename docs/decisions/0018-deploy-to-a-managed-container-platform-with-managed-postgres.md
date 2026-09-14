@@ -131,7 +131,7 @@ part that decides how it runs.
 
 **Postscript — 2026-09-14, after actually deploying.** The decision stands
 unchanged; this records what stopped being hypothetical. Steps are in
-[`docs/deploy-railway.md`](../deploy-railway.md).
+[`docs/deploy-railway.md`](deploy-railway.md).
 
 *Live at `frontend-production-e086.up.railway.app`; `chatbot` and Postgres have
 no public domain.*

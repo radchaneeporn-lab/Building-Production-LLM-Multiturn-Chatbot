@@ -127,7 +127,7 @@ the endpoint is as unmetered as it was yesterday.
 ---
 
 **Postscript — 2026-09-14, verified in production.** Deployed per
-[`docs/deploy-railway.md`](../deploy-railway.md); decision unchanged.
+[`docs/deploy-railway.md`](deploy-railway.md); decision unchanged.
 
 Confirmed on the live deployment, not just locally:
 

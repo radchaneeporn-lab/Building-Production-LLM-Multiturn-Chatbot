@@ -4,8 +4,8 @@ The runbook for putting this project on Railway, written immediately after doing
 it the first time — so the order below is the order that *works*, not the order
 the docs imply. Every gotcha in the last section is one that actually happened.
 
-**Decisions this implements:** [ADR 0018](decisions/0018-deploy-to-a-managed-container-platform-with-managed-postgres.md)
-(platform + managed Postgres) and [ADR 0019](decisions/0019-make-the-frontend-the-only-public-surface.md)
+**Decisions this implements:** [ADR 0018](0018-deploy-to-a-managed-container-platform-with-managed-postgres.md)
+(platform + managed Postgres) and [ADR 0019](0019-make-the-frontend-the-only-public-surface.md)
 (frontend public, backend private). This file is the *how*; those are the *why*.
 
 **What you end up with:**
@@ -352,5 +352,5 @@ no authentication and no rate limit — a public URL is an open path to a paid m
 for anyone who finds it. `MAX_TOKENS` caps cost per call, nothing caps calls per
 hour. Don't post the URL publicly, and delete the project when you're done
 experimenting. This is the gap tracked as backlog §5 in
-[`decisions/README.md`](decisions/README.md), and deploying is what made it urgent
+[`decisions/README.md`](README.md), and deploying is what made it urgent
 rather than theoretical.
