@@ -66,6 +66,17 @@ services:
       - MODEL_NAME=${MODEL_NAME:-claude-haiku-4-5-20251001}
       - MAX_TOKENS=${MAX_TOKENS:-712}
       - SYSTEM_PROMPT=${SYSTEM_PROMPT:-You are a helpful assistant. Be concise.}
+      # [LEARNING] ADR 0020. The shared secret the frontend's proxy must
+      # present; main_api.py REFUSES TO BOOT without it, so a dev-only
+      # default here is what keeps `docker compose up` working — and the
+      # reason that's acceptable is that this port is only published to
+      # localhost. In Railway both services get the same real random value
+      # and neither has a default to fall back on.
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-only-not-a-secret}
+      # Per-identity request cap and the global daily token budget. Set low
+      # here on purpose: it makes the 429 easy to see while developing.
+      - RATE_LIMIT_PER_HOUR=${RATE_LIMIT_PER_HOUR:-20}
+      - DAILY_OUTPUT_TOKEN_BUDGET=${DAILY_OUTPUT_TOKEN_BUDGET:-50000}
     volumes:
       - chatbot-data:/app/data   # survives `docker compose down`; image layer doesn't
     healthcheck:
@@ -96,6 +107,15 @@ services:
       # is `up -d`. It was `build.args`, so changing it used to be
       # `up -d --build`.
       - API_URL=http://chatbot:8000
+      # [LEARNING] ADR 0020 — all three are SERVER-side only. None is
+      # NEXT_PUBLIC_*, so none reaches the browser: the password is compared
+      # in the route handler, the cookie is signed in the route handler, and
+      # the internal key is attached to the outbound fetch. A NEXT_PUBLIC_
+      # prefix on any of these would compile the secret into the page.
+      - APP_PASSWORD=${APP_PASSWORD:-letmein}
+      - COOKIE_SECRET=${COOKIE_SECRET:-dev-only-cookie-secret-not-random}
+      # Must match the chatbot service's value above.
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY:-dev-only-not-a-secret}
     depends_on:
       - chatbot
 

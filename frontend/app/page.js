@@ -22,7 +22,83 @@ import styles from "./page.module.css";
 // the backend server-side, reading API_URL at request time. The browser
 // never learns where the backend is — and no longer needs to.
 
+// [LEARNING] The login gate (ADR 0020). Note what this component does NOT
+// do: decide anything. It asks the server whether this browser is signed in
+// and renders accordingly. The actual check lives in the route handlers,
+// because anything decided in client code can be edited by whoever is
+// holding the browser. A UI gate is an affordance, never a control — the
+// chat form being hidden is convenience; /api/chat returning 401 is security.
+function LoginGate({ onSuccess }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || "Sign-in failed.");
+      }
+      setPassword("");
+      onSuccess();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className={styles.page}>
+      <form className={styles.loginCard} onSubmit={submit}>
+        <h1 className={styles.loginTitle}>Multiturn Chatbot</h1>
+        <p className={styles.loginHint}>This deployment is password protected.</p>
+        <input
+          className={styles.input}
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Password"
+          autoFocus
+          autoComplete="current-password"
+        />
+        <button className={styles.button} type="submit" disabled={busy || !password}>
+          {busy ? "Checking…" : "Enter"}
+        </button>
+        {error && <p className={styles.error}>{error}</p>}
+      </form>
+    </main>
+  );
+}
+
 export default function Home() {
+  // null = "haven't asked the server yet", so the page renders neither the
+  // chat nor the login form until it knows — otherwise a signed-in user
+  // sees a login box flash on every refresh.
+  const [authed, setAuthed] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/login")
+      .then((r) => r.json())
+      .then((d) => setAuthed(Boolean(d.authenticated)))
+      .catch(() => setAuthed(false));
+  }, []);
+
+  if (authed === null) return <main className={styles.page} />;
+  if (!authed) return <LoginGate onSuccess={() => setAuthed(true)} />;
+  return <Chat onSignOut={() => setAuthed(false)} />;
+}
+
+function Chat({ onSignOut }) {
   // [LEARNING] session_id starts as null, exactly like main_api.py's
   // ChatRequest.session_id: "omit to start a new conversation". The
   // backend hands one back on the first response; every message after
@@ -56,10 +132,21 @@ export default function Home() {
         body: JSON.stringify({ message: text, session_id: sessionId }),
       });
 
+      // [LEARNING] A session can expire mid-conversation (the cookie is
+      // good for 7 days). Dropping back to the login form on 401 is the
+      // difference between "please sign in again" and an inexplicable
+      // error on a message the user just typed.
+      if (res.status === 401) {
+        onSignOut();
+        return;
+      }
+
       if (!res.ok) {
         // [LEARNING] main_api.py raises HTTPException(404, ...) for an
         // unknown session_id — surface whatever detail it sent back
-        // instead of a generic failure.
+        // instead of a generic failure. 429 and 503 from the rate limiter
+        // (ADR 0020) arrive the same way and already carry a sentence
+        // written for a human, so they need no special case here.
         const detail = await res.json().catch(() => null);
         throw new Error(detail?.detail || `Backend returned ${res.status}`);
       }

@@ -123,3 +123,43 @@ dependency of the API, so a frontend deploy is an outage for the API, which it
 was not before). The honest summary: this fixed a configuration coupling and
 narrowed the attack surface; it did not add a single authorisation check, and
 the endpoint is as unmetered as it was yesterday.
+
+---
+
+**Postscript — 2026-09-14, verified in production.** Deployed per
+[`docs/deploy-railway.md`](../deploy-railway.md); decision unchanged.
+
+Confirmed on the live deployment, not just locally:
+
+- `railway domain list --service chatbot` → **"No domains found"**, and the
+  backend's URL returns 404 from outside. The only public surface is the
+  frontend.
+- Two turns through `https://<app>.up.railway.app/api/chat` threaded one
+  `session_id` and the second answer recalled the first — so the browser →
+  Next.js → private backend → Postgres chain works end to end with no CORS
+  configuration anywhere. `FRONTEND_ORIGIN` is unset in production and
+  `CORSMiddleware` never fires, exactly as this record predicted.
+- Before deploying, `grep -rl 'localhost:8000\|chatbot:8000' .next/static/`
+  matched nothing: the backend address is genuinely absent from the browser
+  bundle. That is this decision's central claim, checkable in one command, and
+  worth re-running after any change to how the frontend is configured.
+
+Two things this record got wrong or under-weighted:
+
+- **"The build-time coupling is removed" was only half true until deploy.** The
+  frontend still needs a `rootDirectory` setting that lives in the platform, not
+  the repo — and with it unset the service builds the *backend's* Dockerfile and
+  succeeds, producing a service named `frontend` that serves the API. A silent
+  wrong build is a worse failure than the baked-URL problem this record
+  replaced, and it is invisible to every check in this repository.
+- **I briefly falsified it myself.** Running `railway domain --service chatbot`
+  to *list* domains created one instead, publishing the backend for around
+  thirty seconds. The topology is only as private as the last command run
+  against it — which argues for a check (`railway domain list --service chatbot`
+  must print "No domains found") rather than trusting that nobody has changed
+  anything. That check is step 10 of the runbook.
+
+Still true, and still the most important sentence here: **this added no
+authorisation.** `/api/chat` is now reachable from the internet by anyone, with
+no auth and no rate limit, spending a real API key. Narrowing the surface is not
+securing it (backlog §5).

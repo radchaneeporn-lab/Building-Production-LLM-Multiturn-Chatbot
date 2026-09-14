@@ -105,6 +105,11 @@ themselves.
 | [0017](0017-move-the-durable-store-to-postgresql.md) | Move the durable store to PostgreSQL, behind the existing seam | Accepted |
 | [0018](0018-deploy-to-a-managed-container-platform-with-managed-postgres.md) | Deploy to a managed container platform, with managed Postgres | Accepted |
 | [0019](0019-make-the-frontend-the-only-public-surface.md) | Make the frontend the only public surface | Accepted |
+| [0020](0020-gate-the-endpoint-with-a-shared-passphrase-and-postgres-rate-limits.md) | Gate the endpoint with a shared passphrase and Postgres rate limits | Accepted |
+
+0018 and 0019 both carry a **Postscript** recording what changed from theory to
+fact once the thing was actually deployed. The steps themselves are not a
+decision and live separately, in [`../deploy-railway.md`](../deploy-railway.md).
 
 ---
 
@@ -177,7 +182,7 @@ time out at each one.
 amplifying.
 
 ### 5. Security — the thinnest pillar in this log
-*From 0009, 0018, 0019*
+*From 0009, 0018, 0019, 0020*
 
 - Authentication vs. authorisation
 - Session tokens vs. signed tokens vs. API keys
@@ -186,13 +191,28 @@ amplifying.
 - Encryption in transit vs. at rest
 - Least privilege and blast radius
 - Data retention and deletion
+- Revocation: why a self-contained signed token cannot be withdrawn, and what
+  server-side session state buys (0020)
+- Rotating a shared secret with no downtime — accepting two valid values at
+  once (0020)
+- Rate limiting the *login* route, not just the expensive one (0020)
+- **Identity federation** (OIDC workload identity) as the alternative to holding
+  a long-lived API key at all — supported by Anthropic for AWS/GCP/Azure/GitHub
+  Actions, not by Railway. The structural fix for the failure below (0018)
+- Which commands can *write*. A live key was leaked by a listing command and an
+  endpoint was published by a domain command, both run as "just checking" —
+  a verification step has a blast radius too (0018, 0019)
 - What a platform's "private network" actually guarantees, and reducing the
   public surface vs. actually authorising a caller — 0019 did the first and
   none of the second (0018, 0019)
 
-**Done when:** `/chat` is no longer an open, unmetered proxy to a paid model.
-Note 0018 made this the log's most urgent item, not its thinnest: the endpoint
-is now reachable from the internet and billed.
+**Done when:** ~~`/chat` is no longer an open, unmetered proxy to a paid
+model.~~ **Met, narrowly, by 0020** — a shared passphrase, a required
+service-to-service header, 20 requests/identity/hour and a daily token budget.
+Read the small print in that record before believing it: there is still no
+per-person identity, no ownership check on `session_id`, no limit on failed
+logins, and no way to revoke a leaked cookie. The endpoint is metered and no
+longer anonymous; it is not yet *authorised*.
 
 ### 6. Cost & quality measurement — blocks pricing and blocks knowing if I broke it
 *From 0010, 0011*

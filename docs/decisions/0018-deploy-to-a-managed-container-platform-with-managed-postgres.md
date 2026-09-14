@@ -126,3 +126,54 @@ metered API with no rate limit (backlog §5) and no unit-cost instrumentation
 live at once. Also charged, quietly, back to operational excellence: the one
 part of this system that is no longer reproducible from the repository is the
 part that decides how it runs.
+
+---
+
+**Postscript — 2026-09-14, after actually deploying.** The decision stands
+unchanged; this records what stopped being hypothetical. Steps are in
+[`docs/deploy-railway.md`](../deploy-railway.md).
+
+*Live at `frontend-production-e086.up.railway.app`; `chatbot` and Postgres have
+no public domain.*
+
+Four things moved from "don't know" to "know":
+
+- **Private networking is IPv6-only here.** Written above as "a thing to verify,
+  not assume" — it was real. `HOST=::` is why the backend logs
+  `Uvicorn running on http://[::]:8000`; bound to `0.0.0.0` it starts, looks
+  healthy, and is unreachable from the frontend with no error on either side.
+- **`PORT` injection is real and differs per service.** Railway gave the backend
+  8000 (pinned) and the frontend 8080. Both honoured it without code changes.
+  A hardcoded `--port 8000` would have failed every healthcheck.
+- **Identity and repository access are two separate GitHub grants.** Logging into
+  Railway with GitHub does not let it read a private repo; the GitHub *App* must
+  be installed on the repo, which is a different screen from the OAuth *App*
+  authorization. `Repository not found or is not accessible` is what that looks
+  like three steps later.
+- **The managed engine is `postgres-ssl:18`**, against `postgres:16-alpine` in
+  Compose. Environment parity (0015's whole claim) does not extend to a managed
+  database's version — the container I control is identical, the service I rent
+  is not.
+
+Two new entries for `What I don't know yet:`
+
+- **What a "read-only-looking" command actually does.** Two commands surprised
+  me by writing: `railway variables <service>` printed a live API key in full
+  (forcing a rotation), and `railway domain --service chatbot` *created* a
+  domain, publishing the backend for about thirty seconds before I deleted it —
+  briefly falsifying 0019 in production. The general lesson is not about this
+  CLI: I do not currently have a habit of checking whether a verification step
+  can mutate, and the blast radius of "just checking" was a leaked credential
+  and an exposed endpoint.
+- **RPO/RTO is still unanswered** (asked in 0007, deferred in 0017, deferred
+  above). Railway offers Postgres point-in-time recovery as a feature I have not
+  enabled, read about, or tested a restore from.
+
+One addition to `Reverses when:` — **identity federation.** Creating the
+replacement API key surfaced that Anthropic supports OIDC federation for GCP,
+AWS, Azure and GitHub Actions: the platform proves who it is and receives a
+token that expires in minutes, so there is no long-lived secret to store, leak,
+or rotate. Railway is not a supported provider, so this deployment cannot use
+it. That is a concrete capability AWS buys that this platform cannot — and given
+that a leaked static key is exactly what went wrong today, it is a stronger
+argument for the ECS option than anything in the Rejected section above.

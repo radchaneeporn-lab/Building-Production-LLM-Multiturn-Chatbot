@@ -24,15 +24,18 @@ file possible.
 # anything that speaks HTTP can now be your client — a curl command, a Next.js frontend, a mobile app — and none of them need to be Python or live in your process.
 
 import os
+import secrets
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.chatbot.client import LLMClient
 from src.chatbot.config import load_inference_config, load_store
+from src.chatbot.limits import RateLimitExceeded, load_rate_limiter
 from src.chatbot.service import ChatService
 
 # ---------------------------------------------------------------------------
@@ -99,6 +102,22 @@ async def lifespan(_app: FastAPI):
     # single instance safely serves every concurrent request; there is no
     # per-request construction cost and no shared-mutable-state risk from
     # reusing it.
+    # [LEARNING] Fail-closed, checked at STARTUP rather than per request.
+    # Same reasoning as PostgresStore opening its pool eagerly (ADR 0017): a
+    # misconfiguration should be a process that refuses to boot while you're
+    # still watching the deploy, not a security hole discovered later. If
+    # this were `if key: check()` per request, forgetting to set it would
+    # leave the endpoint silently open — the failure mode of every auth
+    # control that defaults to allow. See ADR 0020.
+    if not os.environ.get("INTERNAL_API_KEY"):
+        raise RuntimeError(
+            "INTERNAL_API_KEY is not set. main_api.py refuses to start without "
+            "it, because /chat would otherwise accept any caller that can reach "
+            "it. Set it to a random string, and give the SAME value to the "
+            "frontend service so its proxy can send it.\n"
+            "    python -c \"import secrets; print(secrets.token_urlsafe(32))\""
+        )
+
     client = LLMClient()
     # [LEARNING] Which store this returns is an ENVIRONMENT decision, not a
     # code one: DATABASE_URL set -> Postgres, unset -> SQLite at DB_PATH.
@@ -110,6 +129,10 @@ async def lifespan(_app: FastAPI):
     # env-configurable (MODEL_NAME/MAX_TOKENS/SYSTEM_PROMPT), same pattern.
     config = load_inference_config()
     state["service"] = ChatService(client, store, config)
+    # [LEARNING] Same environment-driven choice as load_store(): Postgres
+    # deployment gets real limits, a laptop gets NullRateLimiter and notices
+    # nothing. See src/chatbot/limits.py.
+    state["limiter"] = load_rate_limiter()
     yield
     # [LEARNING] Everything after `yield` runs at SHUTDOWN. A SQLite file
     # tolerated being dropped on the floor here; a Postgres connection POOL
@@ -118,6 +141,7 @@ async def lifespan(_app: FastAPI):
     # client that vanished. This is the teardown half of 0013's lifespan
     # contract finally doing something.
     store.close()
+    state["limiter"].close()
     state.clear()
 
 
@@ -201,6 +225,56 @@ class ChatResponse(BaseModel):
 # worker thread pool so they don't block the event loop from serving other
 # requests concurrently. Reach for `async def` when the body itself awaits
 # something (an async DB driver, an async HTTP call) — there isn't one here.
+# [LEARNING] A DEPENDENCY — FastAPI's mechanism for "run this before the
+# handler, and abort with an HTTP error if it says no." Declaring it in the
+# route decorator's `dependencies=[...]` list (see /chat below) rather than
+# as a parameter is the right shape when the check produces no value the
+# handler needs: it runs, it either passes or raises, and the handler stays
+# unaware that it exists at all.
+def require_internal_key(x_internal_key: str = Header(default="")) -> None:
+    """Reject anything that isn't the frontend proxy. See ADR 0020.
+
+    [LEARNING] `secrets.compare_digest`, not `==`. String comparison in
+    Python short-circuits on the first differing byte, so the time it takes
+    leaks how many leading characters were correct — an attacker can
+    recover a secret byte by byte from timing alone. compare_digest takes
+    the same time regardless. The risk is small over a network; using the
+    constant-time function costs nothing and is simply what you reach for
+    when comparing secrets.
+
+    [LEARNING] Why this exists when the backend already has no public
+    domain: on 2026-09-14 a command run to *read* domains created one
+    instead, and this service was briefly on the public internet. Network
+    topology is a setting any command can flip; a required header is a
+    property of the code. Two independent controls, so one mistake is not
+    an exposure. That is what "defense in depth" means concretely.
+    """
+    expected = os.environ["INTERNAL_API_KEY"]
+    if not secrets.compare_digest(x_internal_key, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+# [LEARNING] An EXCEPTION HANDLER maps a domain exception to an HTTP
+# response, once, for the whole app. The alternative — try/except inside
+# the route — puts transport concerns (status codes, Retry-After) back into
+# handler code, and has to be repeated in every route that can be limited.
+# limits.py raises a plain RateLimitExceeded that knows nothing about HTTP;
+# this function is the only place the two vocabularies meet, which is the
+# same boundary discipline ADR 0001 applies to the Anthropic SDK.
+@app.exception_handler(RateLimitExceeded)
+def rate_limit_handler(_request: Request, exc: RateLimitExceeded) -> JSONResponse:
+    headers = {}
+    if exc.retry_after is not None:
+        # [LEARNING] Retry-After is a standard response header telling the
+        # client how long to wait. A well-behaved client reads it instead
+        # of guessing, which is the difference between backing off and
+        # retry-storming a service that is already struggling.
+        headers["Retry-After"] = str(exc.retry_after)
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=headers
+    )
+
+
 @app.get("/health")
 def health() -> dict:
     # [LEARNING] Deployment platforms (Railway included) poll a route like
@@ -214,14 +288,39 @@ def health() -> dict:
 # — independent of the `-> ChatResponse` return-type hint, which is only
 # for your own editor/type-checker. Returning a ChatResponse instance
 # below (rather than a plain dict) satisfies both at once.
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest) -> ChatResponse:
+@app.post("/chat", response_model=ChatResponse, dependencies=[Depends(require_internal_key)])
+def chat(
+    req: ChatRequest,
+    request: Request,
+    x_client_id: str = Header(default=""),
+) -> ChatResponse:
     # [LEARNING] `req: ChatRequest` is what makes FastAPI parse the POST
     # body as JSON into a ChatRequest instance and hand it to you already
     # validated — there is no `await request.json()` / `json.loads()`
     # anywhere in this file. The type hint on the parameter IS the
     # instruction for where this value comes from and how to build it.
     service = state["service"]
+    limiter = state["limiter"]
+
+    # [LEARNING] WHO is being limited. The shared passphrase (ADR 0020) is
+    # the same for everyone, so it cannot identify anyone — limiting on it
+    # would give all visitors one shared bucket, where the first busy user
+    # locks out the rest. Instead the proxy mints a random per-browser id at
+    # login and forwards it here, so each browser gets its own allowance.
+    #
+    # The IP fallback covers a caller that reaches this service without
+    # going through the proxy. It is deliberately the WEAKER identity:
+    # request.client.host behind a platform proxy is often the proxy's
+    # address, and IPs are shared by whole offices and mobile networks. Good
+    # enough as a backstop, not good enough to rely on — which is why the
+    # cookie-derived id is preferred when present.
+    identity = x_client_id.strip() or (request.client.host if request.client else "unknown")
+
+    # [LEARNING] Checked BEFORE inference, because the entire point is to
+    # not spend money on a call we intend to refuse. Raises
+    # RateLimitExceeded, which the handler above turns into 429 or 503 —
+    # this function never mentions a status code.
+    limiter.check(identity)
 
     # [LEARNING] This block is the ENTIRE difference from main_service.py's
     # sys.argv handling: there, "no ID given" meant a CLI flag was absent;
@@ -243,6 +342,13 @@ def chat(req: ChatRequest) -> ChatResponse:
             raise HTTPException(status_code=404, detail=f"Unknown session: {session_id}")
 
     result = service.send(session_id, req.message)
+
+    # [LEARNING] Recorded AFTER the call, because output tokens are not
+    # knowable before it. This is what makes the daily budget a real cost
+    # control rather than a request count: `result.output_tokens` is the
+    # billed unit, straight from the API response. See limits.py for why
+    # the budget can overshoot by at most one call per concurrent request.
+    limiter.record(result.input_tokens, result.output_tokens)
 
     return ChatResponse(
         session_id=session_id,

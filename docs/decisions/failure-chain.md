@@ -1,6 +1,6 @@
 # The Chatbot Failure Chain
 
-Forty-six things that broke, in the order they broke, and the concept each one
+Fifty-nine things that broke, in the order they broke, and the concept each one
 forced me to learn. Every step names the file I changed and the decision record
 I wrote about it.
 
@@ -9,9 +9,9 @@ step could be moved somewhere else, it's in the wrong place.
 
 | | |
 |---|---|
-| Steps | 46, in 7 phases |
-| Span | `main_plain.py` → PostgreSQL |
-| Records | ADR 0001 → 0017 |
+| Steps | 59, in 9 phases |
+| Span | `main_plain.py` → a public URL |
+| Records | ADR 0001 → 0020 |
 | Companion | [`decisions/README.md`](decisions/README.md) |
 
 ---
@@ -362,6 +362,101 @@ step could be moved somewhere else, it's in the wrong place.
 
 **↓** Tooling rots silently when the system moves under it — **tooling drift**. A tool that fails loudly is fine; one that succeeds against the wrong source teaches you something false.
 
+## Phase 8 — Going public
+
+### 47 · Build-time vs. runtime configuration
+> `frontend/app/api/chat/route.js` · ADR 0019
+
+**✕** The browser's backend URL was `NEXT_PUBLIC_API_URL`, which the framework compiles *into the JavaScript bundle* at build time. So I couldn't build the frontend image until the deployed backend's URL existed, and changing that URL meant rebuilding the image rather than restarting it.
+
+**↓** The same variable read at two different moments is two different mechanisms — **build-time vs. runtime configuration**. Moving the lookup server-side made one image work in every environment. — *`NEXT_PUBLIC_*` / twelve-factor config*
+
+### 48 · Backend for frontend
+> `route.js` · ADR 0019
+
+**✕** Two public services meant one fact — "where is the backend" — written in two places: baked into the browser bundle on one side, handed to `CORSMiddleware` on the other. A mismatch failed as a browser CORS error that never reached my code.
+
+**↓** Let the frontend's own server forward the call — a **backend-for-frontend** proxy. Same-origin requests have no CORS to configure, and the backend needs no public address at all. — *BFF pattern / reverse proxy*
+
+### 49 · PID 1 and signal handling
+> `Dockerfile` · `CMD`
+
+**✕** Expanding `$PORT` forced shell-form `CMD`, which put `sh` at PID 1. A shell doesn't forward signals to its child: `SIGTERM` on redeploy went to the shell, uvicorn never saw it, and the `lifespan` teardown from step 33 silently stopped running.
+
+**↓** **PID 1 has special signal responsibilities.** `exec` replaces the shell with the real process so it receives the signal itself. The tell is exit code 137 — SIGKILL after a timeout — instead of 0. — *`exec` / tini / docker init*
+
+### 50 · Port injection
+> `Dockerfile` · ADR 0018
+
+**✕** `CMD ... --port 8000` was hardcoded. A platform decides which port it routes to and injects it as `$PORT`; my container would have started perfectly and failed every healthcheck.
+
+**↓** The runtime environment chooses the port, not the image — **port injection**. Cheap to verify before deploying: run the image with `PORT=9000` and check it bound 9000.
+
+### 51 · Address families
+> `HOST=::` · ADR 0018
+
+**✕** The backend deployed, reported healthy, and was unreachable from the frontend. Nothing in either log said why.
+
+**↓** The private network was IPv6-only, and `0.0.0.0` binds **IPv4 only** — two **address families**, where listening on the wrong one fails silently instead of loudly. `::` accepts both. — *dual-stack sockets*
+
+### 52 · Read-only-looking commands
+> operational
+
+**✕** Twice I ran a command to *check* something and it *changed* something. `railway variables <service>` printed a live API key in full, forcing a rotation. `railway domain --service chatbot` created a domain instead of listing one, publishing the backend to the internet for about thirty seconds.
+
+**↓** A verification step has a blast radius too. Before running something to "just check", know whether it can write — and prefer the explicit read (`... list`). A `set` command that reports success needs no reading back.
+
+## Phase 9 — Paying for strangers
+
+### 53 · Signed cookies
+> `app/lib/auth.js` · ADR 0020
+
+**✕** My first instinct for "remember they logged in" was a cookie saying so. A cookie is stored by the browser, and the browser belongs to the user — `authenticated=true` is something anyone can type into devtools.
+
+**↓** Attach an **HMAC signature** the server alone can produce. The client may read and edit the cookie, but cannot forge a signature for what it changed. Signed, not encrypted: the contents stay readable, so nothing secret goes in one. — *HMAC-SHA256 / JWT*
+
+### 54 · Constant-time comparison
+> `secrets.compare_digest` · `crypto.timingSafeEqual`
+
+**✕** I compared the secret with `==`.
+
+**↓** String equality returns as soon as two bytes differ, so *how long it takes* leaks how many leading bytes were right — a **timing attack** recovers a secret byte by byte. Comparing secrets uses a **constant-time comparison**; it costs nothing and is simply the tool for the job.
+
+### 55 · Defense in depth
+> `require_internal_key` · ADR 0020
+
+**✕** The backend was safe because it had no public domain. Then a command I ran to *read* domains created one (step 52), and "safe" evaporated for thirty seconds.
+
+**↓** Network topology is a setting any command can flip; a required credential is a property of the code. Two independent controls so one mistake isn't an exposure — **defense in depth**, argued from an incident rather than a principle.
+
+### 56 · Fail closed
+> `main_api.py` · startup check
+
+**✕** I wrote the check as "if the key is configured, verify it." Forgetting to configure it would then leave the endpoint wide open, and nothing would say so.
+
+**↓** An access control that defaults to allow is not a control. **Fail closed**: the process refuses to boot without its secret — the same fail-fast reasoning as opening the database pool at startup (step 40).
+
+### 57 · Atomic upsert
+> `limits.py` · `ON CONFLICT DO UPDATE`
+
+**✕** My first counter was SELECT the count, add one, UPDATE — which is *exactly* the read-then-write race from step 27, rebuilt from scratch in a new file.
+
+**↓** `INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING count` — an **atomic upsert**. The read and the write are one statement, so there is no gap to race in and no lock required. The window is part of the primary key, so no one ever resets a counter: a new hour is a new row.
+
+### 58 · Rate limit vs. cost limit
+> `limits.py` · ADR 0020
+
+**✕** I capped requests per hour and called the cost problem solved. Twenty one-word messages and twenty 712-token messages pass the same limit and cost wildly different amounts.
+
+**↓** A request limit bounds *abuse*; only a **token budget** bounds the *bill*, because tokens are the billed unit. Two limits, two different jobs — and the second is the one that maps onto money.
+
+### 59 · 429 vs. 503
+> `rate_limit_handler` · `Retry-After`
+
+**✕** I returned 429 for both "you're too fast" and "the service is out of budget", so a client that backed off politely still got nowhere.
+
+**↓** A status code is a machine-readable claim about *what happens if you retry*. **429** = slow down, retrying works. **503** = the service is out, retrying sooner changes nothing. Send **`Retry-After`** rather than making clients guess — guessing clients are how retry storms start.
+
 ---
 
 # Jokes aside
@@ -403,6 +498,8 @@ single-writer file quietly caps the whole architecture.
 | 05 | Serving | Build once at startup. Wire format ≠ domain type. Validate at the door. |
 | 06 | Packaging | The image is frozen; config comes from the environment; know the precedence. |
 | 07 | Scaling out | Many writers need a server, a pool, readiness, and the narrowest lock that works. |
+| 08 | Going public | The platform picks the port, the address family and the config moment — and a command run to "check" can write. |
+| 09 | Paying for strangers | Untrusted input includes the cookie you issued; a request limit is not a cost limit. |
 
 ## The tell
 
