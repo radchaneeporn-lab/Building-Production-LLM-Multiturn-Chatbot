@@ -13,6 +13,10 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "fastapi>=0.110.0",
     "uvicorn[standard]>=0.29.0",
+    # psycopg 3 (not psycopg2). [binary] ships prebuilt wheels so the image
+    # needs no libpq/compiler; [pool] is the connection pool PostgresStore
+    # opens at startup.
+    "psycopg[binary,pool]>=3.1",
 ]
 
 [tool.setuptools.packages.find]

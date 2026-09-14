@@ -19,15 +19,13 @@ body. That's what makes the next step (HTTP server) a thin wrapper
 instead of a rewrite.
 """
 # this is step of 	"Learned persistence" + "Learned session IDs" — but still one user at a keyboard
-import os
 import sys
 
 from dotenv import load_dotenv
 
 from src.chatbot.client import LLMClient
-from src.chatbot.models import InferenceConfig
+from src.chatbot.config import load_inference_config, load_store
 from src.chatbot.service import ChatService
-from src.chatbot.storage import SQLiteStore
 
 load_dotenv()
 
@@ -35,17 +33,18 @@ load_dotenv()
 def main() -> None:
     # --- composition root -------------------------------------------------
     # [LEARNING] This is the ONE place where concrete implementations are
-    # chosen and wired together: SQLiteStore (not InMemoryStore), real
+    # chosen and wired together: a real store (not InMemoryStore), a real
     # LLMClient (not a fake), this particular config. Everything deeper
-    # down works against interfaces. Swap SQLiteStore() for
-    # InMemoryStore() here and the whole app still runs — one-line change.
+    # down works against interfaces.
+    # [LEARNING] Which store is now an ENVIRONMENT choice rather than a
+    # source edit — load_store() returns Postgres when DATABASE_URL is set
+    # and SQLite otherwise, so this CLI still runs on a laptop with no
+    # database server, while the container runs on Postgres.
     client = LLMClient()
-    store = SQLiteStore(os.environ.get("DB_PATH", "conversations.db"))
-    config = InferenceConfig(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        system="You are a helpful assistant. Be concise.",
-    )
+    store = load_store()
+    # See src/chatbot/config.py — env-configurable via
+    # MODEL_NAME/MAX_TOKENS/SYSTEM_PROMPT, same pattern.
+    config = load_inference_config()
     service = ChatService(client, store, config)
     # ----------------------------------------------------------------------
 
@@ -93,6 +92,11 @@ def main() -> None:
             f"stop={response.stop_reason}]\n"
         )
 
+    # [LEARNING] Release the store's resources on the way out — a no-op for
+    # InMemoryStore, closes the file handle for SQLite, hands pooled
+    # connections back for Postgres. The CLI's equivalent of main_api.py's
+    # post-`yield` shutdown block.
+    store.close()
     print(f"Bye. Resume anytime:  python main_service.py {session_id}")
 
 

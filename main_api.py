@@ -28,12 +28,12 @@ from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from src.chatbot.client import LLMClient
-from src.chatbot.models import InferenceConfig
+from src.chatbot.config import load_inference_config, load_store
 from src.chatbot.service import ChatService
-from src.chatbot.storage import SQLiteStore
 
 # ---------------------------------------------------------------------------
 # LEARNING NOTE — the FastAPI mental model, in one pass:
@@ -100,19 +100,24 @@ async def lifespan(_app: FastAPI):
     # per-request construction cost and no shared-mutable-state risk from
     # reusing it.
     client = LLMClient()
-    # [LEARNING] DB_PATH is env-configurable (not just hardcoded) so a
-    # container can point it at a mounted volume — e.g. /app/data/conversations.db
-    # — instead of the image's writable layer, which is thrown away on
-    # every redeploy/restart. See ADR 0007's "reverses when" clause: this
-    # is exactly the ephemeral-disk trigger it warned about.
-    store = SQLiteStore(os.environ.get("DB_PATH", "conversations.db"))
-    config = InferenceConfig(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        system="You are a helpful assistant. Be concise.",
-    )
+    # [LEARNING] Which store this returns is an ENVIRONMENT decision, not a
+    # code one: DATABASE_URL set -> Postgres, unset -> SQLite at DB_PATH.
+    # Note what did NOT change to make that possible — ChatService still
+    # takes "a store", because 0006 defined that seam as a Protocol. The
+    # swap 0007 promised would someday be cheap cost exactly one function.
+    store = load_store()
+    # [LEARNING] See src/chatbot/config.py — model/max_tokens/system are
+    # env-configurable (MODEL_NAME/MAX_TOKENS/SYSTEM_PROMPT), same pattern.
+    config = load_inference_config()
     state["service"] = ChatService(client, store, config)
     yield
+    # [LEARNING] Everything after `yield` runs at SHUTDOWN. A SQLite file
+    # tolerated being dropped on the floor here; a Postgres connection POOL
+    # does not — those are live server-side sessions, and a container that
+    # exits without releasing them leaves the server cleaning up after a
+    # client that vanished. This is the teardown half of 0013's lifespan
+    # contract finally doing something.
+    store.close()
     state.clear()
 
 
@@ -121,6 +126,37 @@ async def lifespan(_app: FastAPI):
 # everything after it at shutdown automatically. You never call
 # lifespan() yourself.
 app = FastAPI(lifespan=lifespan)
+
+# [LEARNING] Without this, a browser-based frontend on a different origin
+# (e.g. http://localhost:3000) gets its fetch() calls blocked by the
+# browser itself before a response ever reaches app code — CORS is
+# enforced client-side, not something curl/Swagger UI ever hit, which is
+# why this wasn't needed until a real frontend showed up. The allowed
+# origin is env-configurable (same DB_PATH pattern as ADR 0015) so it can
+# point at a container's published port in Compose instead of a hardcoded
+# localhost guess.
+#
+# [LEARNING] ADR 0019 demoted this to a DEVELOPMENT affordance. In the
+# deployed topology the browser talks only to the frontend's own origin
+# (/api/chat), which forwards here server-side — there is no cross-origin
+# request left for a browser to block, so FRONTEND_ORIGIN goes unset in
+# production and this middleware never fires. It stays because
+# `npm run dev` on the host against this container in Compose IS two
+# origins, and deleting it breaks that. Comma-separated so the dev host
+# and a Compose-published frontend can both be allowed without choosing:
+# CORS matches the Origin header exactly — no wildcards, no port
+# inference, "http://localhost:3000" and "http://127.0.0.1:3000" are two
+# different origins.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.environ.get("FRONTEND_ORIGIN", "http://localhost:3000").split(",")
+        if origin.strip()
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # [LEARNING] Pydantic BaseModel = the "typed dict" this whole file leans
@@ -148,6 +184,13 @@ class ChatResponse(BaseModel):
     input_tokens: int
     output_tokens: int
     stop_reason: str
+    # [LEARNING] Added alongside the ChatService.send() -> TurnResult
+    # change: turn_number and summarized are service-level facts (not
+    # anything the model itself returns), surfaced here so a frontend can
+    # show "turn 5" / a token count / a "conversation summarized" badge
+    # per message without recomputing any of it client-side.
+    turn_number: int
+    summarized: bool
 
 
 # [LEARNING] @app.get("/health") REGISTERS this function as the handler
@@ -207,4 +250,6 @@ def chat(req: ChatRequest) -> ChatResponse:
         input_tokens=result.input_tokens,
         output_tokens=result.output_tokens,
         stop_reason=result.stop_reason,
+        turn_number=result.turn_number,
+        summarized=result.summarized,
     )

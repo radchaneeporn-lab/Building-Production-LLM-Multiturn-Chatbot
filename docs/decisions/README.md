@@ -92,7 +92,7 @@ themselves.
 | [0004](0004-give-history-ownership-to-the-caller.md) | Give history ownership to the caller | Superseded by 0005 |
 | [0005](0005-address-conversations-by-id-not-by-object.md) | Address conversations by ID, not by object | Accepted |
 | [0006](0006-define-the-store-seam-as-a-protocol.md) | Define the store seam as a Protocol | Accepted |
-| [0007](0007-use-sqlite-as-the-first-durable-store.md) | Use SQLite as the first durable store | Accepted |
+| [0007](0007-use-sqlite-as-the-first-durable-store.md) | Use SQLite as the first durable store | Superseded by 0017 |
 | [0008](0008-store-one-row-per-message-with-explicit-ordering.md) | Store one row per message with explicit ordering | Accepted |
 | [0009](0009-use-uuid4-session-identifiers.md) | Use UUID4 session identifiers | Accepted |
 | [0010](0010-manage-context-with-a-window-plus-rolling-summary.md) | Manage context with a window plus rolling summary | Accepted |
@@ -101,6 +101,10 @@ themselves.
 | [0013](0013-build-one-service-instance-per-process-at-startup.md) | Build one service instance per process at startup | Accepted |
 | [0014](0014-concurrency-safety-for-the-sqlite-store.md) | Concurrency safety for the SQLite store | **Open** |
 | [0015](0015-containerize-with-docker-keep-sqlite-on-a-named-volume.md) | Containerize with Docker; keep SQLite on a named volume | Accepted |
+| [0016](0016-load-inference-parameters-from-the-environment.md) | Load inference parameters from the environment, through one loader | Accepted |
+| [0017](0017-move-the-durable-store-to-postgresql.md) | Move the durable store to PostgreSQL, behind the existing seam | Accepted |
+| [0018](0018-deploy-to-a-managed-container-platform-with-managed-postgres.md) | Deploy to a managed container platform, with managed Postgres | Accepted |
+| [0019](0019-make-the-frontend-the-only-public-surface.md) | Make the frontend the only public surface | Accepted |
 
 ---
 
@@ -135,12 +139,14 @@ then make it stop happening.
 - Connection pooling; why pool size is a capacity limit
 - Migrations: versioned, ordered, backward-compatible with running code
 - Backup, RPO, RTO — as numbers I choose, not features I enable
+- What a *managed* backup tier actually promises, and restoring from one at
+  least once — a backup nobody has restored is a belief (0018)
 
 **Done when:** I can state my RPO and RTO, and explain what happens to
 `conversations.db` on redeploy without guessing.
 
 ### 3. The server & request lifecycle — blocks understanding my own runtime
-*From 0003, 0005, 0013*
+*From 0003, 0005, 0013, 0018, 0019*
 
 - ASGI: application, server, event loop, thread pool, worker processes
 - `def` vs. `async def` and where blocking hurts
@@ -149,6 +155,10 @@ then make it stop happening.
 - Graceful shutdown, SIGTERM, drain periods
 - Liveness vs. readiness checks
 - Load balancing, health checks, why sticky sessions are a smell
+- Proxying between two servers: which headers to forward and which to drop,
+  `X-Forwarded-For`, and two request lifecycles in series (0019)
+- Build-time vs. runtime configuration — the same variable read at two
+  different moments is two different mechanisms (0019)
 
 **Done when:** I can draw every hop a `/chat` request takes, and name what can
 time out at each one.
@@ -167,7 +177,7 @@ time out at each one.
 amplifying.
 
 ### 5. Security — the thinnest pillar in this log
-*From 0009*
+*From 0009, 0018, 0019*
 
 - Authentication vs. authorisation
 - Session tokens vs. signed tokens vs. API keys
@@ -176,8 +186,13 @@ amplifying.
 - Encryption in transit vs. at rest
 - Least privilege and blast radius
 - Data retention and deletion
+- What a platform's "private network" actually guarantees, and reducing the
+  public surface vs. actually authorising a caller — 0019 did the first and
+  none of the second (0018, 0019)
 
 **Done when:** `/chat` is no longer an open, unmetered proxy to a paid model.
+Note 0018 made this the log's most urgent item, not its thinnest: the endpoint
+is now reachable from the internet and billed.
 
 ### 6. Cost & quality measurement — blocks pricing and blocks knowing if I broke it
 *From 0010, 0011*

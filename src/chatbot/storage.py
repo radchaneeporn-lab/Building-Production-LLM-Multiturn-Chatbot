@@ -65,6 +65,16 @@ class ConversationStore(Protocol):
     def get_summary(self, session_id: str) -> tuple[str | None, int]: ...
     def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None: ...
 
+    # [LEARNING] Added when PostgresStore arrived. A dict and a SQLite file
+    # both tolerate never being closed; a CONNECTION POOL does not — it
+    # holds real server-side sessions that should be handed back on
+    # shutdown. Once one implementation needs a teardown hook, the hook
+    # belongs on the seam, not bolted onto one class and special-cased at
+    # every call site with hasattr(). The two stores that have nothing to
+    # release implement it as a no-op, which is the honest answer rather
+    # than an absent method.
+    def close(self) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Implementation 1: in-memory dict — the "before" picture
@@ -113,6 +123,9 @@ class InMemoryStore:
 
     def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None:
         self._summaries[session_id] = (summary, summarized_through_turn)
+
+    def close(self) -> None:
+        """Nothing to release — a dict dies with the process."""
 
 
 # ---------------------------------------------------------------------------
@@ -265,13 +278,213 @@ class SQLiteStore:
                 (summary, summarized_through_turn, session_id),
             )
 
+    def close(self) -> None:
+        self._conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Implementation 3: PostgreSQL — the "after the single-writer file" picture
+# ---------------------------------------------------------------------------
+class PostgresStore:
+    """Same interface again, over a real database server.
+
+    [LEARNING] What actually changed versus SQLiteStore, and why each one
+    is forced rather than cosmetic:
+
+      CONNECTION -> POOL. SQLite was ONE connection shared across threads
+        (`check_same_thread=False`). Postgres is a server reached over a
+        socket, and a connection is a real server-side session that can
+        only run one statement at a time. FastAPI runs `def` route
+        handlers in a thread pool, so concurrent requests genuinely need
+        concurrent connections — hence a POOL, sized once at startup.
+        Opening a connection per request instead would pay a TCP+auth
+        handshake on every /chat call.
+
+      PLACEHOLDERS ? -> %s. Cosmetic, but the discipline behind it is not:
+        still parameterized, never f-strings. Message content is
+        user-controlled; that hasn't changed just because the engine did.
+
+      COUNT(*) -> MAX(turn_index) + 1, under a ROW LOCK. This is the real
+        upgrade, and 0014's open race is why. The SQLite version read a
+        count and then inserted; two concurrent appends to one session
+        could both read N and both try to write turn N. SQLite hid this
+        behind a global write lock on the whole file — correct, but by
+        serializing EVERY writer in the process. Postgres locks a single
+        session's row instead (`SELECT ... FOR UPDATE`), so two different
+        conversations still append in parallel while two appends to the
+        SAME conversation take turns. That's the concurrency win that
+        motivated the move, made explicit.
+    """
+
+    def __init__(self, conninfo: str, min_size: int = 1, max_size: int = 10) -> None:
+        # [LEARNING] Imported HERE, not at module top, so that importing
+        # this module at all doesn't require a Postgres driver. Someone
+        # running main_service.py on SQLite — no database server, no
+        # DATABASE_URL — should not need psycopg installed to do it, and a
+        # top-level import would make them. The cost of an optional backend
+        # is paid by whoever actually asks for that backend.
+        try:
+            from psycopg_pool import ConnectionPool
+        except ModuleNotFoundError as exc:  # pragma: no cover - setup error
+            raise RuntimeError(
+                "DATABASE_URL is set, which selects PostgresStore, but the "
+                "Postgres driver is not installed. Either install it:\n"
+                "    pip install 'psycopg[binary,pool]'\n"
+                "or unset DATABASE_URL to fall back to SQLite."
+            ) from exc
+
+        # [LEARNING] `open=True` then `wait()` is deliberate: it forces the
+        # first connection at STARTUP. Without it the pool opens lazily and
+        # a bad DATABASE_URL / unreachable database surfaces as a failed
+        # request minutes later, instead of a process that refuses to boot.
+        # Fail fast, loudly, at the point the operator is still watching.
+        self._pool = ConnectionPool(conninfo, min_size=min_size, max_size=max_size, open=True)
+        self._pool.wait(timeout=30)
+        self._create_schema()
+
+    def _create_schema(self) -> None:
+        # [LEARNING] No PRAGMA-style hand-rolled migration here, unlike
+        # SQLiteStore — this database starts empty, so the CREATE statements
+        # ARE the whole schema. That convenience expires the first time this
+        # schema changes while rows already exist in a deployed database;
+        # that's the point a real migration tool stops being optional.
+        with self._pool.connection() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                    id                      TEXT PRIMARY KEY,
+                    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    summary_text            TEXT,
+                    summarized_through_turn INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages (
+                    session_id  TEXT    NOT NULL REFERENCES sessions(id),
+                    turn_index  INTEGER NOT NULL,
+                    role        TEXT    NOT NULL,
+                    content     TEXT    NOT NULL,
+                    token_count INTEGER NOT NULL DEFAULT 0,
+                    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    PRIMARY KEY (session_id, turn_index)
+                )
+                """
+            )
+
+    def create_session(self) -> str:
+        session_id = str(uuid.uuid4())
+        # [LEARNING] `with pool.connection()` borrows a connection AND opens
+        # a transaction; leaving the block commits, an exception rolls back
+        # and the connection goes back to the pool either way.
+        with self._pool.connection() as conn:
+            conn.execute("INSERT INTO sessions (id) VALUES (%s)", (session_id,))
+        return session_id
+
+    def session_exists(self, session_id: str) -> bool:
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT 1 FROM sessions WHERE id = %s", (session_id,)).fetchone()
+        return row is not None
+
+    def load(self, session_id: str) -> list[Message]:
+        with self._pool.connection() as conn:
+            exists = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = %s", (session_id,)
+            ).fetchone()
+            if exists is None:
+                # Same KeyError all three stores raise — see SQLiteStore.load.
+                raise KeyError(session_id)
+            rows = conn.execute(
+                """
+                SELECT role, content, token_count FROM messages
+                WHERE session_id = %s
+                ORDER BY turn_index
+                """,
+                (session_id,),
+            ).fetchall()
+        return [
+            Message(role=role, content=content, token_count=token_count)
+            for role, content, token_count in rows
+        ]
+
+    def append(self, session_id: str, *messages: Message) -> None:
+        if not messages:
+            return
+        with self._pool.connection() as conn:
+            # [LEARNING] FOR UPDATE takes a row-level lock on THIS session
+            # that is held until the transaction ends. A second append to
+            # the same session blocks right here until the first commits,
+            # so it reads a MAX(turn_index) that already includes the first
+            # writer's rows. This is PESSIMISTIC locking: take the lock
+            # before reading, rather than detecting the collision after the
+            # fact (the PRIMARY KEY would catch it, but only as an error to
+            # retry). Appends to OTHER sessions are untouched.
+            locked = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = %s FOR UPDATE", (session_id,)
+            ).fetchone()
+            if locked is None:
+                raise KeyError(session_id)
+
+            (next_index,) = conn.execute(
+                "SELECT COALESCE(MAX(turn_index) + 1, 0) FROM messages WHERE session_id = %s",
+                (session_id,),
+            ).fetchone()
+
+            # [LEARNING] MAX+1, not COUNT(*) as the SQLite version used.
+            # They agree only while nothing is ever deleted; MAX+1 stays
+            # correct afterwards, and turn_index is the ordering key (0008),
+            # so a collision there corrupts message order permanently.
+            conn.cursor().executemany(
+                """
+                INSERT INTO messages (session_id, turn_index, role, content, token_count)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                [
+                    (session_id, next_index + i, m.role, m.content, m.token_count or 0)
+                    for i, m in enumerate(messages)
+                ],
+            )
+
+    def get_summary(self, session_id: str) -> tuple[str | None, int]:
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT summary_text, summarized_through_turn FROM sessions WHERE id = %s",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(session_id)
+        return row[0], row[1]
+
+    def set_summary(self, session_id: str, summary: str, summarized_through_turn: int) -> None:
+        with self._pool.connection() as conn:
+            conn.execute(
+                "UPDATE sessions SET summary_text = %s, summarized_through_turn = %s WHERE id = %s",
+                (summary, summarized_through_turn, session_id),
+            )
+
+    def close(self) -> None:
+        """Hand every pooled connection back to the server."""
+        self._pool.close()
+
 
 # ---------------------------------------------------------------------------
 # WHAT'S DELIBERATELY *NOT* HERE YET:
 #
 # 1. delete_session / list_sessions — trivial to add when a UI needs them.
-# 2. A real migration TOOL (alembic etc.) — the hand-rolled
-#    PRAGMA table_info checks above work for one or two added columns,
-#    but won't scale to renamed/dropped columns or multi-step migrations.
-# 3. Connection pooling / real concurrency — comes with the HTTP server.
+# 2. A real migration TOOL (alembic etc.). Still absent, and now it matters
+#    more, not less: PostgresStore's CREATE TABLE IF NOT EXISTS only helps
+#    an empty database. The moment this schema changes while a deployed
+#    database holds rows, there is no mechanism here to move it forward.
+# 3. Indexes beyond the primary keys. `WHERE session_id = ... ORDER BY
+#    turn_index` is served by the (session_id, turn_index) PK, which is why
+#    nothing is slow yet — that is luck of column order, not a decision
+#    anyone made, and it stops holding the first time a query filters on
+#    anything else.
+# 4. A data migration from the SQLite file. PostgresStore starts EMPTY;
+#    conversations written before the switch still live in conversations.db
+#    and are not reachable from a Postgres-backed process.
+# 5. Retry/reconnect policy. If Postgres restarts, in-flight pooled
+#    connections fail; the pool reopens them, but a request in flight at
+#    that moment still surfaces the error to the caller.
 # ---------------------------------------------------------------------------

@@ -58,13 +58,20 @@ def truncate_history(
     client: LLMClient,
     store: ConversationStore,
     config: TruncationConfig | None = None,
-) -> list[Message]:
-    """Return the history that should actually be sent to the model.
+) -> tuple[list[Message], bool]:
+    """Return (history that should actually be sent to the model, summarized?).
 
-    Below the window: `history` unchanged. Above it: the last N turns,
-    with a rolling summary of everything older PREPENDED INTO THE FIRST
-    message's content — not placed in the system prompt (see below), and
-    not added as a new Message (see below).
+    Below the window: `history` unchanged, `summarized=False`. Above it:
+    the last N turns, with a rolling summary of everything older
+    PREPENDED INTO THE FIRST message's content — not placed in the system
+    prompt (see below), and not added as a new Message (see below) —
+    `summarized=True`.
+
+    [LEARNING] The bool is just `total_turns > config.keep_last_n_turns`
+    — callers (ChatService) could recompute it themselves from the same
+    inputs. It's returned instead of recomputed so there is exactly ONE
+    place that decides "did this turn cross the window," matching the one
+    place that acts on that decision.
 
     [LEARNING] Why not the system prompt:
     `system` is the one part of a request that's supposed to stay
@@ -91,7 +98,7 @@ def truncate_history(
     total_turns = len(history) // 2
 
     if total_turns <= config.keep_last_n_turns:
-        return history
+        return history, False
 
     # How many turns should be *represented in the summary* as of this call.
     turns_to_summarize = total_turns - config.keep_last_n_turns
@@ -140,7 +147,7 @@ def truncate_history(
             f"\n\n---\n\n{first_recent.content}"
         ),
     )
-    return [prefixed_first, *recent_turns[1:]]
+    return [prefixed_first, *recent_turns[1:]], True
 
 
 # ---------------------------------------------------------------------------

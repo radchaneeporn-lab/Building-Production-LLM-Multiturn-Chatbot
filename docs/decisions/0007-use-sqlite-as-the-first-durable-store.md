@@ -2,7 +2,7 @@
 # 0007: Use SQLite as the first durable store
 
 **Date:** 2026-08-12 (recorded retroactively)
-**Status:** Accepted
+**Status:** Superseded by 0017
 
 **Context:**
 `InMemoryStore` loses every conversation on process restart. Durability is the

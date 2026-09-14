@@ -1,12 +1,71 @@
 services:
+  # [LEARNING] The database is now a SEPARATE CONTAINER, not a file inside
+  # the app's. That is the whole structural change: 0007's SQLite file was
+  # reachable only by the one process that opened it, so "scale the app"
+  # and "share the data" were in conflict. A server on the network can be
+  # opened by many processes at once, which is what makes `--scale
+  # chatbot=3` a sane thing to try.
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-chatbot}
+      # [LEARNING] A default password in a tracked file is a DEV-ONLY
+      # convenience: this port is never published to the host (no `ports:`
+      # below — only services on this Compose network can reach it). Any
+      # real deployment must override POSTGRES_PASSWORD from the
+      # environment, the way ANTHROPIC_API_KEY already is.
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-chatbot}
+      - POSTGRES_DB=${POSTGRES_DB:-chatbot}
+    volumes:
+      - chatbot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # [LEARNING] `depends_on` alone only waits for the container to START,
+      # not for Postgres to be ready to accept connections — and Postgres
+      # takes a second or two to initialise on first boot. Without this
+      # healthcheck the app wins the race and dies opening its pool.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatbot} -d ${POSTGRES_DB:-chatbot}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   chatbot:
     build: .
     ports:
       - "8000:8000"
     env_file:
       - .env            # supplies ANTHROPIC_API_KEY
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
+      # [LEARNING] `db` is the SERVICE NAME, resolved by Compose's internal
+      # DNS — unlike NEXT_PUBLIC_API_URL below, this hostname is used from
+      # INSIDE the network (by the Python process), so the Docker-internal
+      # name is correct here and `localhost` would be wrong.
+      - DATABASE_URL=${DATABASE_URL:-postgresql://chatbot:chatbot@db:5432/chatbot}
+      # Only read when DATABASE_URL is unset (see config.py's load_store).
+      # Kept so the SQLite path still works, and so the pre-migration
+      # conversations.db in the volume below isn't orphaned by deletion.
       - DB_PATH=/app/data/conversations.db
+      # Must match the frontend's HOST-side origin — the browser sends
+      # this as its Origin header, and CORSMiddleware in main_api.py
+      # checks it against exactly this string, not the Docker-internal
+      # service name.
+      - FRONTEND_ORIGIN=http://localhost:3000
+      # Read by src/chatbot/config.py's load_inference_config().
+      #
+      # [LEARNING] `${VAR:-default}` means "use the shell's VAR if it's set,
+      # otherwise this default". That gives two ways to change a value:
+      #   permanent -> edit the default here, then `docker compose up -d`
+      #   one-off   -> MAX_TOKENS=50 docker compose up -d   (nothing to edit,
+      #                nothing to revert, no git churn)
+      # A bare `- MAX_TOKENS=712` would NOT allow the one-off form: a
+      # hardcoded value in this file always beats the shell (verified).
+      # Either way it's `up -d`, never `--build` — these are runtime env
+      # values, not baked into the image.
+      - MODEL_NAME=${MODEL_NAME:-claude-haiku-4-5-20251001}
+      - MAX_TOKENS=${MAX_TOKENS:-712}
+      - SYSTEM_PROMPT=${SYSTEM_PROMPT:-You are a helpful assistant. Be concise.}
     volumes:
       - chatbot-data:/app/data   # survives `docker compose down`; image layer doesn't
     healthcheck:
@@ -15,5 +74,34 @@ services:
       timeout: 5s
       retries: 3
 
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # [LEARNING] This moved from `build.args` to `environment:` — and
+      # the value INVERTED, which is the tell that something real changed
+      # (ADR 0019). It used to be NEXT_PUBLIC_API_URL=http://localhost:8000:
+      # baked into the browser bundle at build time, so it had to be an
+      # address the BROWSER could reach, from outside this network.
+      #
+      # Now it is read at request time by app/api/chat/route.js, which runs
+      # in the frontend CONTAINER — so the Docker-internal service name is
+      # the correct address and `localhost` would be wrong (localhost inside
+      # that container is the container itself). Same reasoning as
+      # DATABASE_URL=...@db:5432 above; the browser no longer participates.
+      #
+      # Consequence worth noticing: this is `environment:`, so changing it
+      # is `up -d`. It was `build.args`, so changing it used to be
+      # `up -d --build`.
+      - API_URL=http://chatbot:8000
+    depends_on:
+      - chatbot
+
 volumes:
+  # The pre-Postgres SQLite file. Kept deliberately: the migration does not
+  # copy it, so deleting this volume is the point of no return for anything
+  # said to the bot before the switch.
   chatbot-data:
+  chatbot-pgdata:

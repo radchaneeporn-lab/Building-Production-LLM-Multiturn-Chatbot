@@ -3,9 +3,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# [LEARNING] PORT and HOST are ENV with defaults, not literals in CMD, because
+# a deploy platform INJECTS the port it wants the container to bind and routes
+# traffic to that port only — a hardcoded `--port 8000` boots fine and then
+# fails every healthcheck, which is a confusing way to learn this (ADR 0018).
+# HOST is a variable for a narrower reason: some platforms' private networking
+# is IPv6-only, where binding `0.0.0.0` listens on the wrong address family and
+# the service is simply unreachable. `HOST=::` is the fix there; `0.0.0.0` is
+# right for Compose and stays the default.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DB_PATH=/app/data/conversations.db
+    DB_PATH=/app/data/conversations.db \
+    PORT=8000 \
+    HOST=0.0.0.0
 
 # Install dependencies first, from only the files pip needs to resolve them
 # (pyproject.toml + the src/ package it points at). This layer is cached
@@ -26,8 +36,16 @@ USER appuser
 
 EXPOSE 8000
 
-# Same /health route a platform load balancer would poll.
+# Same /health route a platform load balancer would poll. Reads $PORT rather
+# than assuming 8000, for the same reason CMD does.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=3)" || exit 1
+    CMD python -c "import os,urllib.request as u; u.urlopen(f\"http://127.0.0.1:{os.environ['PORT']}/health\", timeout=3)" || exit 1
 
-CMD ["uvicorn", "main_api:app", "--host", "0.0.0.0", "--port", "8000"]
+# [LEARNING] Shell form (not the exec-form JSON array) because $PORT/$HOST have
+# to be EXPANDED, and Docker only does that through a shell. But a shell as
+# PID 1 does not forward signals to its child: `docker stop` / a platform's
+# redeploy sends SIGTERM to sh, uvicorn never sees it, and 30s later everything
+# is SIGKILLed — so lifespan's `store.close()` (ADR 0013, main_api.py) silently
+# stops running and Postgres connections leak on every deploy. `exec` replaces
+# the shell with uvicorn, so uvicorn IS PID 1 and receives the signal itself.
+CMD ["sh", "-c", "exec uvicorn main_api:app --host \"$HOST\" --port \"$PORT\""]

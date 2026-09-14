@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .client import LLMClient
-from .models import InferenceConfig, InferenceResponse, Message
+from .models import InferenceConfig, Message, TurnResult
 from .storage import ConversationStore
 from .truncation import TruncationConfig, truncate_history
 
@@ -59,7 +59,7 @@ class ChatService:
         """Start a new conversation; return its handle."""
         return self._store.create_session()
 
-    def send(self, session_id: str, user_text: str) -> InferenceResponse:
+    def send(self, session_id: str, user_text: str) -> TurnResult:
         """One turn of one conversation: load -> infer -> append."""
 
         # 1. LOAD — rebuild the conversation from storage. Fresh every
@@ -68,14 +68,19 @@ class ChatService:
         #    is the single source of truth.)
         history = self._store.load(session_id)
 
+        # [LEARNING] `history` is loaded BEFORE this turn's pair is
+        # appended, so len(history) // 2 is how many turns already
+        # happened — this turn is the next one.
+        turn_number = len(history) // 2 + 1
+
         # 1.5 TRUNCATE — the seam noted in the module docstring below.
         #     Keeps the last N turns verbatim; folds anything older into a
         #     rolling summary (cached in the store, updated incrementally)
         #     prepended into the first kept message (see truncation.py for
         #     why it's NOT put in the system prompt). When the conversation
         #     is still shorter than the window, this is just `history`
-        #     unchanged.
-        recent_history = truncate_history(
+        #     unchanged, and `summarized` is False.
+        recent_history, summarized = truncate_history(
             session_id, history, self._client, self._store, self._truncation_config
         )
 
@@ -127,7 +132,14 @@ class ChatService:
         )
         self._store.append(session_id, user_msg, assistant_msg)
 
-        return response
+        return TurnResult(
+            text=response.text,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            stop_reason=response.stop_reason,
+            turn_number=turn_number,
+            summarized=summarized,
+        )
 
     def get_history(self, session_id: str) -> list[Message]:
         """Expose history read-only — for UIs that re-render the transcript."""

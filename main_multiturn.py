@@ -28,8 +28,8 @@ logic barely changes. That seam is the point.
 from dotenv import load_dotenv
 
 from src.chatbot.client import LLMClient
+from src.chatbot.config import load_inference_config
 from src.chatbot.conversation import Conversation
-from src.chatbot.models import InferenceConfig
 
 load_dotenv()  # reads ANTHROPIC_API_KEY from .env if present
 
@@ -37,11 +37,9 @@ load_dotenv()  # reads ANTHROPIC_API_KEY from .env if present
 def main() -> None:
     client = LLMClient()
 
-    config = InferenceConfig(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=1024,
-        system="You are a helpful assistant. Be concise.",
-    )
+    # See src/chatbot/config.py — env-configurable via
+    # MODEL_NAME/MAX_TOKENS/SYSTEM_PROMPT instead of hardcoded here.
+    config = load_inference_config()
 
     convo = Conversation(client, config)
 

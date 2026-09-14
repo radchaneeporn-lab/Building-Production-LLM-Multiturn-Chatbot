@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.git/
+
+# secrets/local overrides — never baked into the image
+.env*.local
+
+# not needed inside the image
+README.md
+.dockerignore
+Dockerfile
