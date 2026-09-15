@@ -4,19 +4,18 @@ Architecture Decision Records (ADRs) for `Production-Agentic-Multiturn-Chatbot`.
 
 ## What goes in here
 
-One record per decision that is **expensive to reverse**. Not every choice —
-variable names, formatting, and anything a single commit can undo are not
-decisions in this sense. The test: *if I changed my mind in three months,
-would it cost me an afternoon or a rewrite?* Afternoon -> no record.
-Rewrite -> record.
+One record per decision that's expensive to reverse. Not every choice —
+variable names, formatting, anything a single commit can undo isn't a
+decision in this sense. The test: if I changed my mind in three months,
+would it cost an afternoon or a rewrite? Afternoon, no record. Rewrite,
+record.
 
 ## What a record is for
 
-Six months from now, the code will still show *what* you chose. It will not
-show what you rejected, what you were optimising for, what would make the
-choice wrong, or **what you did not understand at the time**. That context is
-the part that evaporates, and it is the part you need when the constraint
-changes.
+Six months from now the code will still show what you chose. It won't show
+what you rejected, what you were optimising for, what would make the choice
+wrong, or what you didn't understand at the time. That context is the part
+that evaporates, and it's the part you need when the constraint changes.
 
 ## Format
 
@@ -29,35 +28,35 @@ Status:            Accepted | Superseded by NNNN | Open
 Context:           What forced a choice. Include the constraint, not just the goal.
 Options:           What was actually on the table.
 Chose:             The decision, plus the reason in one or two lines.
-Rejected:          The runners-up and why they lost — this is the highest-value field.
+Rejected:          The runners-up and why they lost — the highest-value field.
 Reverses when:     The condition that makes this decision wrong. Write it now,
                    while you can still see it.
 
 What I know:       The understanding this decision actually rests on. Short.
 What I don't
-know yet:          The gaps. Named as topics, phrased as questions I can't yet
-                   answer. This is the honesty valve — it is what stops a
-                   record from becoming false confidence.
+know yet:          The gaps, named as topics, phrased as questions I can't yet
+                   answer. This is what stops a record from becoming false
+                   confidence.
 
 Pillar pressure:   What this bought, and which pillar it charged.
 ```
 
-Two fields do the heavy lifting and both are easy to skip:
+Two fields do the heavy lifting, and both are easy to skip:
 
-**`Reverses when:`** turns a static choice into a *trigger* — something you can
-watch for rather than rediscover during an incident.
+`Reverses when:` turns a static choice into a trigger — something to watch
+for instead of rediscover during an incident.
 
-**`What I don't know yet:`** does two jobs at once. It keeps the record honest
-("SQLite is fine for production" is dangerous; "SQLite works now, and I don't
-know what happens to the file on redeploy" is useful), and it generates your
-study list from real blockers instead of a syllabus. A record with gaps is still
-a record. `Status: Open` with four options and no decision — see 0014 — is a
+`What I don't know yet:` does two jobs. It keeps the record honest ("SQLite
+is fine for production" is dangerous; "SQLite works now, and I don't know
+what happens to the file on redeploy" is useful), and it generates a study
+list from real blockers instead of a syllabus. A record with gaps is still
+a record — `Status: Open` with four options and no decision (see 0014) is a
 perfectly good entry.
 
 ## Pillar pressure: the six questions
 
-Every real decision buys something in one pillar and charges another. If you
-cannot name the cost, run these until one produces an answer:
+Every real decision buys something in one pillar and charges another. If
+you can't name the cost, run these until one produces an answer:
 
 | Question | Pillar |
 |---|---|
@@ -68,19 +67,18 @@ cannot name the cost, run these until one produces an answer:
 | What happens when something I depend on breaks? | Reliability |
 | Am I doing work I don't need to do? | Sustainability |
 
-If you only ever run two, run **hostile user** and **cost per month** — those
-are the two whose failures are silent. Load and dependency failures announce
-themselves.
+If you only ever run two, run **hostile user** and **cost per month** —
+those two fail silently. Load and dependency failures announce themselves.
 
 ## Conventions
 
 - Four-digit zero-padded number, monotonic, never reused.
-- One decision per file. A file is never rewritten to say something different;
-  if the decision changes, write a new record and set the old one's status to
-  `Superseded by NNNN`. The log is append-only, like the `messages` table —
-  and for the same reason (see 0008).
-- Titles are imperative and specific: `Store conversation state in SQLite`,
-  not `Storage`.
+- One decision per file. A file is never rewritten to say something
+  different; if the decision changes, write a new record and set the old
+  one's status to `Superseded by NNNN`. The log is append-only, like the
+  `messages` table, and for the same reason (see 0008).
+- Titles are imperative and specific: `Store conversation state in
+  SQLite`, not `Storage`.
 
 ## Current records
 
@@ -107,17 +105,19 @@ themselves.
 | [0019](0019-make-the-frontend-the-only-public-surface.md) | Make the frontend the only public surface | Accepted |
 | [0020](0020-gate-the-endpoint-with-a-shared-passphrase-and-postgres-rate-limits.md) | Gate the endpoint with a shared passphrase and Postgres rate limits | Accepted |
 
-0018 and 0019 both carry a **Postscript** recording what changed from theory to
-fact once the thing was actually deployed. The steps themselves are not a
-decision and live separately, in [`../deploy-railway.md`](deploy-railway.md).
+0018 and 0019 both carry a Postscript recording what changed from theory to
+fact once the thing was actually deployed. The deploy steps themselves
+aren't a decision and live separately, in
+[`../deploy-railway.md`](deploy-railway.md).
 
 ---
 
 ## Learning backlog
 
-Every item below came out of a `What I don't know yet:` field. Nothing here is
-vendor-specific by design — these are the primitives that transfer to any cloud,
-any provider. Service names get learned later, as *implementations* of these.
+Every item below came out of a `What I don't know yet:` field. Nothing here
+is vendor-specific by design — these are primitives that transfer to any
+cloud, any provider. Service names get learned later, as implementations of
+these.
 
 Ordered by what blocks the next step, not by topic.
 
@@ -128,11 +128,11 @@ Ordered by what blocks the next step, not by topic.
 - Atomicity, critical sections, read-then-write as the classic race
 - Locks: mutexes, granularity, deadlock, cost
 - Optimistic vs. pessimistic concurrency control
-- The GIL: what it does and does not protect
+- The GIL: what it does and doesn't protect
 - Load testing — reproducing a race on demand
 
-**Done when:** I can make my own `turn_index` collision happen deliberately,
-then make it stop happening.
+**Done when:** I can make my own `turn_index` collision happen
+deliberately, then make it stop happening.
 
 ### 2. Storage & databases — blocks deployment and durability
 *From 0007, 0008*
@@ -143,8 +143,8 @@ then make it stop happening.
 - Indexes: what they physically are, and reading a query plan
 - Connection pooling; why pool size is a capacity limit
 - Migrations: versioned, ordered, backward-compatible with running code
-- Backup, RPO, RTO — as numbers I choose, not features I enable
-- What a *managed* backup tier actually promises, and restoring from one at
+- Backup, RPO, RTO — numbers I choose, not features I enable
+- What a managed backup tier actually promises, and restoring from one at
   least once — a backup nobody has restored is a belief (0018)
 
 **Done when:** I can state my RPO and RTO, and explain what happens to
@@ -160,13 +160,13 @@ then make it stop happening.
 - Graceful shutdown, SIGTERM, drain periods
 - Liveness vs. readiness checks
 - Load balancing, health checks, why sticky sessions are a smell
-- Proxying between two servers: which headers to forward and which to drop,
-  `X-Forwarded-For`, and two request lifecycles in series (0019)
+- Proxying between two servers: which headers to forward and which to
+  drop, `X-Forwarded-For`, and two request lifecycles in series (0019)
 - Build-time vs. runtime configuration — the same variable read at two
   different moments is two different mechanisms (0019)
 
-**Done when:** I can draw every hop a `/chat` request takes, and name what can
-time out at each one.
+**Done when:** I can draw every hop a `/chat` request takes, and name what
+can time out at each one.
 
 ### 4. Reliability of external calls — blocks trusting the provider
 *From 0002, 0012*
@@ -178,8 +178,8 @@ time out at each one.
 - Idempotency keys; at-least-once vs. exactly-once
 - Two-system consistency: outbox pattern, compensating actions
 
-**Done when:** a provider 429 during a burst degrades gracefully instead of
-amplifying.
+**Done when:** a provider 429 during a burst degrades gracefully instead
+of amplifying.
 
 ### 5. Security — the thinnest pillar in this log
 *From 0009, 0018, 0019, 0020*
@@ -191,60 +191,63 @@ amplifying.
 - Encryption in transit vs. at rest
 - Least privilege and blast radius
 - Data retention and deletion
-- Revocation: why a self-contained signed token cannot be withdrawn, and what
-  server-side session state buys (0020)
-- Rotating a shared secret with no downtime — accepting two valid values at
-  once (0020)
-- Rate limiting the *login* route, not just the expensive one (0020)
-- **Identity federation** (OIDC workload identity) as the alternative to holding
-  a long-lived API key at all — supported by Anthropic for AWS/GCP/Azure/GitHub
-  Actions, not by Railway. The structural fix for the failure below (0018)
-- Which commands can *write*. A live key was leaked by a listing command and an
-  endpoint was published by a domain command, both run as "just checking" —
-  a verification step has a blast radius too (0018, 0019)
-- What a platform's "private network" actually guarantees, and reducing the
-  public surface vs. actually authorising a caller — 0019 did the first and
-  none of the second (0018, 0019)
+- Revocation: why a self-contained signed token can't be withdrawn, and
+  what server-side session state buys (0020)
+- Rotating a shared secret with no downtime — accepting two valid values
+  at once (0020)
+- Rate limiting the login route, not just the expensive one (0020)
+- **Identity federation** (OIDC workload identity) as the alternative to
+  holding a long-lived API key at all — supported by Anthropic for
+  AWS/GCP/Azure/GitHub Actions, not by Railway. The structural fix for the
+  failure below (0018)
+- Which commands can write. A live key was leaked by a listing command
+  and an endpoint was published by a domain command, both run as "just
+  checking" — a verification step has a blast radius too (0018, 0019)
+- What a platform's "private network" actually guarantees, and reducing
+  the public surface vs. actually authorising a caller — 0019 did the
+  first and none of the second (0018, 0019)
 
 **Done when:** ~~`/chat` is no longer an open, unmetered proxy to a paid
 model.~~ **Met, narrowly, by 0020** — a shared passphrase, a required
-service-to-service header, 20 requests/identity/hour and a daily token budget.
-Read the small print in that record before believing it: there is still no
-per-person identity, no ownership check on `session_id`, no limit on failed
-logins, and no way to revoke a leaked cookie. The endpoint is metered and no
-longer anonymous; it is not yet *authorised*.
+service-to-service header, 20 requests/identity/hour and a daily token
+budget. Read the small print in that record before believing it: there's
+still no per-person identity, no ownership check on `session_id`, no limit
+on failed logins, and no way to revoke a leaked cookie. The endpoint is
+metered and no longer anonymous; it isn't yet authorised.
 
 ### 6. Cost & quality measurement — blocks pricing and blocks knowing if I broke it
 *From 0010, 0011*
 
 - Unit economics: define the unit, then instrument it
-- Evaluation: an eval set as the regression test for a non-deterministic system
+- Evaluation: an eval set as the regression test for a non-deterministic
+  system
 - Prompt caching mechanics; cache key design, TTL, invalidation, hit rate
 - Tokenisation basics
 
-**Done when:** I can answer "what did this conversation cost" and "did that
-change make answers worse."
+**Done when:** I can answer "what did this conversation cost" and "did
+that change make answers worse."
 
 ### 7. Code-level hygiene — cheap, and currently absent
 *From 0001, 0006*
 
-- **Tests.** There are none. The Protocol seam in 0006 exists precisely to make
-  them easy, and one suite run against both store implementations would prove
-  they behave identically.
+- **Tests.** There are none. The Protocol seam in 0006 exists precisely
+  to make them easy, and one suite run against both store implementations
+  would prove they behave identically.
 - Fakes vs. mocks vs. stubs
 - Schema evolution and versioning of persisted types
-- Structured content modelling (when `content: str` becomes content blocks)
+- Structured content modelling (when `content: str` becomes content
+  blocks)
 
-**Done when:** `pytest` runs and the store contract is verified against both
-implementations.
+**Done when:** `pytest` runs and the store contract is verified against
+both implementations.
 
 ---
 
 ## Adding a record
 
 Copy the format block above, take the next number, write it in under ten
-minutes. Leave `What I don't know yet:` genuinely blunt — a gap you have named
-is searchable; a gap you have papered over is not.
+minutes. Leave `What I don't know yet:` genuinely blunt — a gap you've
+named is searchable; a gap you've papered over isn't.
 
-If it takes longer than ten minutes, you are writing a design document — which
-is a fine thing to write, but it belongs in `docs/design/`, not here.
+If it takes longer than ten minutes, you're writing a design document,
+which is a fine thing to write, but it belongs in `docs/design/`, not here.

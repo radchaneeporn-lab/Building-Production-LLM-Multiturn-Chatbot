@@ -1,11 +1,11 @@
 # The Chatbot Failure Chain
 
-Fifty-nine things that broke, in the order they broke, and the concept each one
-forced me to learn. Every step names the file I changed and the decision record
-I wrote about it.
+Fifty-nine things that broke, in the order they broke, and the concept each
+one forced me to learn. Every step names the file I changed and the
+decision record it produced.
 
-Read it as a chain: each concept is *caused* by the previous step's failure. If a
-step could be moved somewhere else, it's in the wrong place.
+Read it as a chain: each concept is caused by the previous step's failure.
+If a step could be moved somewhere else, it's in the wrong place.
 
 | | |
 |---|---|
@@ -21,30 +21,30 @@ step could be moved somewhere else, it's in the wrong place.
 ### 01 · Stateless inference
 > `main_plain.py`
 
-**✕** I sent a prompt, got a reply, printed it. Then I asked a follow-up question and the model had no idea what I'd just said.
+**✕** I sent a prompt, got a reply, printed it. Then I asked a follow-up and the model had no idea what I'd just said.
 
 **↓** Every request is independent — **stateless inference**. The model has no memory; "conversation" is something I construct by resending the past. — *Anthropic Messages API / OpenAI Chat Completions*
 
 ### 02 · The messages array
 > `models.py` · `Message`
 
-**✕** So I glued the history together into one big string. It fell apart the first time a message contained a quote mark and the model started answering its own earlier turn.
+**✕** So I glued the history into one big string. It fell apart the first time a message contained a quote mark and the model started answering its own earlier turn.
 
-**↓** Turns are structured data, not text — a **messages array** of role/content pairs, where the boundary between speakers is a field rather than punctuation I hope survives.
+**↓** Turns are structured data, not text — a **messages array** of role/content pairs, where the boundary between speakers is a field, not punctuation I hope survives.
 
 ### 03 · Anti-corruption layer
 > `models.py` · ADR 0001
 
 **✕** I passed the SDK's own response objects around the whole app. An SDK upgrade then broke files that never called the SDK.
 
-**↓** Wrap foreign types at the border and pass my own — an **anti-corruption layer**; older books call it just "the domain model". The test is mechanical: `grep -rn "anthropic" src/` should hit one file. — *Python dataclasses / Pydantic models*
+**↓** Wrap foreign types at the border and pass my own — an **anti-corruption layer** (older books just call it "the domain model"). The test is mechanical: `grep -rn "anthropic" src/` should hit one file. — *Python dataclasses / Pydantic models*
 
 ### 04 · Adapter
 > `client.py` · ADR 0002
 
 **✕** Even with my own types, `import anthropic` had spread to five files. Trying a second provider meant editing all five.
 
-**↓** One file speaks the vendor's language and nothing else does — an **adapter** (the port/adapter or "hexagonal" shape; the newer phrase is provider abstraction, same idea). — *client.py / LiteLLM*
+**↓** One file speaks the vendor's language and nothing else does — an **adapter** (the port/adapter or "hexagonal" shape). — *client.py / LiteLLM*
 
 ### 05 · Streaming transport
 > `client.py` · `infer_streaming` · ADR 0003
@@ -60,7 +60,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 06 · Encapsulated conversation state
 > `conversation.py` · ADR 0004
 
-**✕** My history lived in a local list inside `main()`. It worked perfectly for exactly one person at one keyboard.
+**✕** My history lived in a local list inside `main()`. Worked perfectly for exactly one person at one keyboard.
 
 **↓** Give the conversation an owner — an object that holds its own turns and appends to them, so the loop stops doing bookkeeping. **Encapsulated conversation state**.
 
@@ -83,7 +83,7 @@ step could be moved somewhere else, it's in the wrong place.
 
 **✕** I made the interface a base class, which meant every store had to inherit from mine — including ones I'd want to write later against someone else's code.
 
-**↓** Match on shape, not ancestry: **structural typing** via `Protocol`, versus the **nominal typing** of an ABC. Duck typing that the type checker actually enforces. — *typing.Protocol / Go interfaces*
+**↓** Match on shape, not ancestry: **structural typing** via `Protocol`, versus the **nominal typing** of an ABC. Duck typing the type checker actually enforces. — *typing.Protocol / Go interfaces*
 
 ---
 
@@ -129,7 +129,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 15 · Window plus rolling summary
 > `truncation.py` · ADR 0010
 
-**✕** I dropped the oldest turns to fit. The model promptly forgot the user's name, which had been mentioned once, in turn one.
+**✕** I dropped the oldest turns to fit. The model promptly forgot the user's name, mentioned once, in turn one.
 
 **↓** Keep recent turns verbatim and compress the rest — a **sliding window plus rolling summary**. Recent wording matters exactly; old turns matter only as facts.
 
@@ -143,9 +143,9 @@ step could be moved somewhere else, it's in the wrong place.
 ### 17 · Prompt caching
 > ADR 0011
 
-**✕** I put the rolling summary in the system prompt. That made the one part of the request that never changes change on every single turn.
+**✕** I put the rolling summary in the system prompt. That made the one part of the request that never changes, change on every turn.
 
-**↓** Providers bill less for a repeated identical prefix — **prompt caching** — so the stable block must actually stay stable. Churning the system prompt throws away the discount I was set up to get.
+**↓** Providers bill less for a repeated identical prefix — **prompt caching** — so the stable block has to actually stay stable. Churning the system prompt throws away the discount I was set up to get.
 
 ### 18 · Strict role alternation
 > ADR 0011
@@ -182,7 +182,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 22 · Composition root and lifespan
 > `lifespan()` · ADR 0013
 
-**✕** I built the client, store and service inside the route handler — so every single request reopened a database and rebuilt the object graph.
+**✕** I built the client, store and service inside the route handler, so every single request reopened a database and rebuilt the object graph.
 
 **↓** Build the graph once where the process starts, tear it down where it ends: a **composition root** plus an **application lifespan**. Under HTTP there's no `main()`, so startup needs a defined home. — *FastAPI lifespan / ASP.NET Startup*
 
@@ -196,7 +196,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 24 · DTO
 > `ChatRequest` · `ChatResponse`
 
-**✕** I returned my internal result object straight out of the endpoint. Renaming an internal field would silently have changed my public API with nothing to warn me.
+**✕** I returned my internal result object straight out of the endpoint. Renaming an internal field would silently have changed my public API with no warning.
 
 **↓** The wire format is a contract, separate from the domain type behind it — a **DTO** (older vocabulary: serializer, view model). Mine combines fields from two sources and renames one, so it was never a passthrough anyway. — *Pydantic BaseModel / Django serializers*
 
@@ -210,7 +210,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 26 · CORS
 > `FRONTEND_ORIGIN` · `frontend/app/page.js`
 
-**✕** I built a browser frontend and its `fetch()` failed with no HTTP status at all — while `curl` against the same URL worked perfectly.
+**✕** I built a browser frontend and its `fetch()` failed with no HTTP status at all — while `curl` against the same URL worked fine.
 
 **↓** The browser blocks cross-origin reads unless the server opts in — **CORS**, enforced client-side, which is exactly why curl and Swagger never hit it. It's the browser refusing, not my server erroring. — *CORSMiddleware / nginx add_header*
 
@@ -249,7 +249,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 31 · Images are immutable
 > `docker compose up --build`
 
-**✕** I edited my Python, refreshed the browser, and saw no change. I refreshed harder. Still nothing — for a full day, because the container was serving yesterday's code.
+**✕** I edited my Python, refreshed the browser, and saw no change. Refreshed harder. Still nothing — for a full day, because the container was serving yesterday's code.
 
 **↓** An image is an **immutable build artifact**: a snapshot taken at build time, not a live view of my folder. Source change → rebuild. Env-var change → restart only. Knowing which I owe is the whole trick.
 
@@ -288,7 +288,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 36 · Client-server database
 > `PostgresStore` · ADR 0017 (supersedes 0007)
 
-**✕** My race from step 27 had no fix available: SQLite hides it behind a lock on the entire file, which serialises every writer in the process and protects nothing at all once a second process exists.
+**✕** My race from step 27 had no fix available: SQLite hides it behind a lock on the entire file, which serialises every writer in the process and protects nothing once a second process exists.
 
 **↓** A file database has one writer by design; a **client-server database** is built for many. The constraint wasn't performance, it was that "more than one process" was off the table. — *PostgreSQL / MySQL*
 
@@ -367,7 +367,7 @@ step could be moved somewhere else, it's in the wrong place.
 ### 47 · Build-time vs. runtime configuration
 > `frontend/app/api/chat/route.js` · ADR 0019
 
-**✕** The browser's backend URL was `NEXT_PUBLIC_API_URL`, which the framework compiles *into the JavaScript bundle* at build time. So I couldn't build the frontend image until the deployed backend's URL existed, and changing that URL meant rebuilding the image rather than restarting it.
+**✕** The browser's backend URL was `NEXT_PUBLIC_API_URL`, which the framework compiles into the JavaScript bundle at build time. So I couldn't build the frontend image until the deployed backend's URL existed, and changing that URL meant rebuilding the image rather than restarting it.
 
 **↓** The same variable read at two different moments is two different mechanisms — **build-time vs. runtime configuration**. Moving the lookup server-side made one image work in every environment. — *`NEXT_PUBLIC_*` / twelve-factor config*
 
@@ -402,9 +402,9 @@ step could be moved somewhere else, it's in the wrong place.
 ### 52 · Read-only-looking commands
 > operational
 
-**✕** Twice I ran a command to *check* something and it *changed* something. `railway variables <service>` printed a live API key in full, forcing a rotation. `railway domain --service chatbot` created a domain instead of listing one, publishing the backend to the internet for about thirty seconds.
+**✕** Twice I ran a command to check something and it changed something instead. `railway variables <service>` printed a live API key in full, forcing a rotation. `railway domain --service chatbot` created a domain instead of listing one, publishing the backend to the internet for about thirty seconds.
 
-**↓** A verification step has a blast radius too. Before running something to "just check", know whether it can write — and prefer the explicit read (`... list`). A `set` command that reports success needs no reading back.
+**↓** A verification step has a blast radius too. Before running something to "just check," know whether it can write, and prefer the explicit read (`... list`). A `set` command that reports success needs no reading back.
 
 ## Phase 9 — Paying for strangers
 
@@ -413,19 +413,19 @@ step could be moved somewhere else, it's in the wrong place.
 
 **✕** My first instinct for "remember they logged in" was a cookie saying so. A cookie is stored by the browser, and the browser belongs to the user — `authenticated=true` is something anyone can type into devtools.
 
-**↓** Attach an **HMAC signature** the server alone can produce. The client may read and edit the cookie, but cannot forge a signature for what it changed. Signed, not encrypted: the contents stay readable, so nothing secret goes in one. — *HMAC-SHA256 / JWT*
+**↓** Attach an **HMAC signature** the server alone can produce. The client may read and edit the cookie, but can't forge a signature for what it changed. Signed, not encrypted: the contents stay readable, so nothing secret goes in one. — *HMAC-SHA256 / JWT*
 
 ### 54 · Constant-time comparison
 > `secrets.compare_digest` · `crypto.timingSafeEqual`
 
 **✕** I compared the secret with `==`.
 
-**↓** String equality returns as soon as two bytes differ, so *how long it takes* leaks how many leading bytes were right — a **timing attack** recovers a secret byte by byte. Comparing secrets uses a **constant-time comparison**; it costs nothing and is simply the tool for the job.
+**↓** String equality returns as soon as two bytes differ, so how long it takes leaks how many leading bytes were right — a **timing attack** recovers a secret byte by byte. Comparing secrets uses a **constant-time comparison**; it costs nothing and is simply the tool for the job.
 
 ### 55 · Defense in depth
 > `require_internal_key` · ADR 0020
 
-**✕** The backend was safe because it had no public domain. Then a command I ran to *read* domains created one (step 52), and "safe" evaporated for thirty seconds.
+**✕** The backend was safe because it had no public domain. Then a command I ran to read domains created one (step 52), and "safe" evaporated for thirty seconds.
 
 **↓** Network topology is a setting any command can flip; a required credential is a property of the code. Two independent controls so one mistake isn't an exposure — **defense in depth**, argued from an incident rather than a principle.
 
@@ -439,29 +439,29 @@ step could be moved somewhere else, it's in the wrong place.
 ### 57 · Atomic upsert
 > `limits.py` · `ON CONFLICT DO UPDATE`
 
-**✕** My first counter was SELECT the count, add one, UPDATE — which is *exactly* the read-then-write race from step 27, rebuilt from scratch in a new file.
+**✕** My first counter was SELECT the count, add one, UPDATE — exactly the read-then-write race from step 27, rebuilt from scratch in a new file.
 
-**↓** `INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING count` — an **atomic upsert**. The read and the write are one statement, so there is no gap to race in and no lock required. The window is part of the primary key, so no one ever resets a counter: a new hour is a new row.
+**↓** `INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING count` — an **atomic upsert**. The read and the write are one statement, so there's no gap to race in and no lock required. The window is part of the primary key, so no one ever resets a counter: a new hour is a new row.
 
 ### 58 · Rate limit vs. cost limit
 > `limits.py` · ADR 0020
 
 **✕** I capped requests per hour and called the cost problem solved. Twenty one-word messages and twenty 712-token messages pass the same limit and cost wildly different amounts.
 
-**↓** A request limit bounds *abuse*; only a **token budget** bounds the *bill*, because tokens are the billed unit. Two limits, two different jobs — and the second is the one that maps onto money.
+**↓** A request limit bounds *abuse*; only a **token budget** bounds the *bill*, because tokens are the billed unit. Two limits, two different jobs, and the second is the one that maps onto money.
 
 ### 59 · 429 vs. 503
 > `rate_limit_handler` · `Retry-After`
 
-**✕** I returned 429 for both "you're too fast" and "the service is out of budget", so a client that backed off politely still got nowhere.
+**✕** I returned 429 for both "you're too fast" and "the service is out of budget," so a client that backed off politely still got nowhere.
 
-**↓** A status code is a machine-readable claim about *what happens if you retry*. **429** = slow down, retrying works. **503** = the service is out, retrying sooner changes nothing. Send **`Retry-After`** rather than making clients guess — guessing clients are how retry storms start.
+**↓** A status code is a machine-readable claim about what happens if you retry. **429** = slow down, retrying works. **503** = the service is out, retrying sooner changes nothing. Send **`Retry-After`** rather than making clients guess — guessing clients are how retry storms start.
 
 ---
 
-# Jokes aside
+# The short version
 
-The compressed version — what to keep when the forty-six steps have blurred.
+What to keep once the fifty-nine steps have blurred.
 
 ## The smallest honest system to start from
 
@@ -469,23 +469,24 @@ The compressed version — what to keep when the forty-six steps have blurred.
 One file. Send a messages array to the API, print the reply.
 No store. No server. No container.
 
-Everything else in this document is a response to a specific
-thing that broke — never a thing I added because it looked professional.
+Everything else here is a response to something specific
+that broke — never something added because it looked professional.
 ```
 
 ## Three questions that regenerate the whole list
 
 **1. Where does the state live, and who's allowed to write it?**
-Regenerates steps 6–13 and 27, 36–41: memory → session ID → store seam → durability →
-ordering → races → locking. Almost every structural decision falls out of this one.
+Regenerates steps 6–13 and 27, 36–41: memory → session ID → store seam →
+durability → ordering → races → locking. Almost every structural decision
+falls out of this one.
 
 **2. What has to change without a rebuild?**
-Regenerates 28–35: what's baked into the image versus supplied at runtime, and the
-precedence chain between the places a value can come from.
+Regenerates 28–35: what's baked into the image versus supplied at runtime,
+and the precedence chain between the places a value can come from.
 
-**3. What happens on the second concurrent user — and the second process?**
-Regenerates 21–23 and 36–39: stateless services, pooling, readiness, and why a
-single-writer file quietly caps the whole architecture.
+**3. What happens on the second concurrent user, and the second process?**
+Regenerates 21–23 and 36–39: stateless services, pooling, readiness, and
+why a single-writer file quietly caps the whole architecture.
 
 ## Seven buckets for recall under pressure
 
@@ -506,23 +507,26 @@ single-writer file quietly caps the whole architecture.
 **Reads as junior:**
 > "I moved it to Postgres, so the concurrency problem is solved."
 
-Treats a tool as a fix. Names the technology instead of the failure mode, and doesn't
-say what's still broken.
+Treats a tool as a fix. Names the technology instead of the failure mode,
+and doesn't say what's still broken.
 
 **Reads as senior:**
-> "The row lock closed the `turn_index` collision — I verified it with five concurrent
-> writers. Two simultaneous turns still compute against a stale history, so the rows are
-> ordered and the conversation can still interleave. I haven't decided between a
-> turn-length lock and optimistic versioning."
+> "The row lock closed the `turn_index` collision — I verified it with
+> five concurrent writers. Two simultaneous turns still compute against a
+> stale history, so the rows are ordered and the conversation can still
+> interleave. I haven't decided between a turn-length lock and optimistic
+> versioning."
 
-Separates what was fixed from what was proven from what's still open. Names the
-remaining failure mode precisely enough that someone else could pick it up.
+Separates what was fixed from what was proven from what's still open, and
+names the remaining failure mode precisely enough for someone else to pick
+up.
 
 ---
 
 ## Open threads
 
-Five steps in this chain are unresolved, and together they are the real backlog:
+Five steps in this chain are unresolved, and together they're the real
+backlog:
 
 | Step | Thread | Where it's tracked |
 |---|---|---|

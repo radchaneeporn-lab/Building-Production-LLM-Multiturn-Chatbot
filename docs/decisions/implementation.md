@@ -80,10 +80,10 @@ codebase — every layer appears exactly once.
 | 10 | `main_api.py` | `limiter.record(in, out)` — bill the token budget |
 | 11 | ↳ | `ChatResponse` → proxy → browser |
 
-Two things worth noticing about the order. The credential check (4) and the
-limit check (5) both happen **before** any model call, so a refused request
-costs nothing. And persistence (9) happens **after** inference succeeds, so a
-failed call leaves no orphaned user message.
+Two things about the order matter. The credential check (4) and the limit
+check (5) both happen before any model call, so a refused request costs
+nothing. And persistence (9) happens after inference succeeds, so a failed
+call leaves no orphaned user message.
 
 ---
 
@@ -191,9 +191,9 @@ compiled into either image.
 None is `NEXT_PUBLIC_*`, so none reaches the browser. A `NEXT_PUBLIC_` prefix on
 any of the bottom three would compile the secret into the page.
 
-**The sharpest edge here:** `INTERNAL_API_KEY` must be identical in two places
-and nothing verifies that it is. Absent is caught loudly (the backend won't
-start); *different* is caught by nothing — both services look healthy and every
+The sharpest edge here: `INTERNAL_API_KEY` must be identical in two places,
+and nothing verifies that it is. Missing is caught loudly (the backend won't
+start); different is caught by nothing — both services look healthy and every
 message returns 401. This cost a real debugging cycle on 2026-09-14.
 
 ---
@@ -217,10 +217,10 @@ python main_service.py
 
 ---
 
-## 8. What this version does *not* do
+## 8. What this version does not do
 
-Stated plainly, because a system's documentation is where overclaiming does the
-most damage. Each item links to where it is tracked.
+Stated plainly, because documentation that overclaims is worse than none.
+Each item links to where it's tracked.
 
 - **No per-person identity.** The passphrase is shared, so everyone who signs in
   is the same "who". Nothing checks that a `session_id` belongs to the caller —

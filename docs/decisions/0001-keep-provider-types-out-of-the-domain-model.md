@@ -4,9 +4,9 @@
 **Status:** Accepted
 
 **Context:**
-Every layer of the app needs to talk about "a message" and "a model response."
-The Anthropic SDK already has types for both. Reusing them is the path of least
-resistance and saves writing `models.py` entirely.
+Every layer needs to talk about "a message" and "a model response." The
+Anthropic SDK already has types for both, and reusing them saves writing
+`models.py` at all.
 
 **Options:**
 1. Pass SDK objects (`anthropic.types.Message`, `Usage`) through the whole app.
@@ -14,46 +14,44 @@ resistance and saves writing `models.py` entirely.
 3. Define local dataclasses (`Message`, `InferenceConfig`, `InferenceResponse`)
    and translate at the edge.
 
-**Chose:** (3). `models.py` has zero outgoing imports and is the shared
-vocabulary every other module depends on. `Message.to_api_dict()` is the only
-place that knows the wire shape. Verifiable invariant:
-`grep -rn "anthropic" src/` returns `client.py` and nothing else.
+**Chose:** (3). `models.py` imports nothing, and it's the shared vocabulary
+every other module depends on. `Message.to_api_dict()` is the only place that
+knows the wire shape. `grep -rn "anthropic" src/` returns `client.py` and
+nothing else — that's the check that proves it.
 
 **Rejected:**
-(1) makes the SDK a transitive dependency of the service layer, the storage
-layer, and the tests — a provider swap or a breaking SDK release then touches
-every file, and tests need SDK objects constructed by hand. (2) loses type
-checking exactly where the data is user-controlled, and gives no place to hang
-derived fields like `token_count` (which is deliberately *not* sent to the API —
-see `to_api_dict()`).
+(1) makes the SDK a dependency of the service layer, the storage layer, and
+the tests. A provider swap or a breaking SDK release then touches every file,
+and tests need SDK objects built by hand. (2) loses type checking exactly
+where the data is user-controlled, and gives nowhere to put derived fields
+like `token_count` (deliberately not sent to the API — see `to_api_dict()`).
 
-**Reverses when:** Never, realistically. The translation cost is a few lines per
-type and it is the load-bearing decision under 0002, 0006, and every test
-that will ever be written. Revisit only if the domain model starts duplicating
-so much of the SDK surface (tool blocks, thinking blocks, citations) that the
-mapping layer becomes the bulk of the code — at which point the answer is a
-richer content model, not the removal of the seam.
+**Reverses when:** Probably never. Translating costs a few lines per type, and
+everything in 0002 and 0006 depends on this seam existing. Revisit only if the
+domain model ends up duplicating most of the SDK (tool blocks, thinking
+blocks, citations) — at that point the fix is a richer content model, not
+removing the seam.
 
 **What I know:**
-- Why an anti-corruption layer exists: a volatile external type must not become
-  a transitive dependency of stable internal code.
+- Why a volatile external type shouldn't become a dependency of stable
+  internal code (an "anti-corruption layer").
 - How to translate in both directions at a single boundary.
-- That `token_count` can ride on the domain type without leaking to the wire.
+- That `token_count` can live on the domain type without leaking into the
+  request sent to the API.
 
-**What I don't know yet → fundamentals to learn:**
-- **Schema evolution / versioning.** `Message` is currently `role + content: str`.
-  Real messages carry content *blocks* — text, images, tool calls, tool results.
-  When that change lands, every stored row written under the old shape still
-  exists. How do you change a data shape that already has persisted instances?
-  (Keywords: backward/forward compatibility, additive-only changes, schema
-  version fields.)
-- **Serialisation boundaries.** `to_api_dict()` handles one direction to one
-  consumer. A real system serialises the same type to a database, an HTTP
-  response, a log line, and a message queue — each with different rules about
-  what's allowed to leak. What's the discipline for keeping those separate?
-- **Structured content modelling.** Once `content` stops being a string, the
-  question of how to model a discriminated union of block types becomes real.
-  This is where Pydantic earns its keep over dataclasses.
+**What I don't know yet:**
+- **Schema evolution.** `Message` is currently `role + content: str`. Real
+  messages carry blocks — text, images, tool calls, results. When that
+  changes, old rows are already stored in the old shape. How do you change a
+  data shape that has persisted instances? (backward/forward compatibility,
+  additive-only changes, version fields.)
+- **Serialisation boundaries.** `to_api_dict()` only handles one direction to
+  one consumer. A real system serialises the same type to a database, an HTTP
+  response, a log line, a queue — each with different rules about what's
+  allowed to leak.
+- **Structured content.** Once `content` stops being a plain string, modelling
+  a union of block types becomes real — this is where Pydantic earns its keep
+  over dataclasses.
 
 **Pillar pressure:** Operational excellence (changeability, testability).
-Costs a little up-front effort; buys freedom for every layer above.
+Small upfront cost, buys freedom for every layer above.
