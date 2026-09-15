@@ -232,7 +232,6 @@ Each item links to where it's tracked.
   one. RPO and RTO remain unstated. *(0007 → 0017 → 0018, asked three times,
   answered none)*
 - **No tests.** Every claim in this document was checked by hand with `curl`.
-  *(backlog §7)*
 - **One replica only, deliberately.** Two concurrent turns on one session still
   both load the same history, so the conversation can interleave incoherently
   even though the rows stay correctly ordered. *(0014 Open, 0017)*
@@ -252,14 +251,11 @@ Each item links to where it's tracked.
 Read in this order:
 
 1. **This file** — the shape.
-2. **`failure-chain.md`** — 59 failures in causal order. It explains *why* the
-   shape is this shape better than any architecture diagram can.
-3. **`README.md` §Learning backlog** — what is knowingly unfinished, ordered by
-   what blocks the next step.
-4. **Any ADR whose title sounds surprising.** 0003, 0011, 0012 and 0019 each
+2. **`failure-chain.md`** — 59 failures in causal order, and the "Still open"
+   section at the bottom for what's knowingly unfinished.
+3. **Any ADR whose title sounds surprising.** 0003, 0011, 0012, and 0019 each
    record a choice whose reasoning is invisible in the code.
 
 The one rule the log keeps: a record is never rewritten to say something
-different. Decisions that changed are `Superseded by NNNN`; decisions that were
-merely *confirmed by reality* carry a **Postscript** (see 0018 and 0019). What
-was believed at the time is part of the record.
+different. If a decision changed, a new one supersedes it rather than editing
+the old one.

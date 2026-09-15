@@ -357,10 +357,7 @@ Rough idle floor at Railway's rates (~$0.000231/GB-minute of RAM):
 A $5 trial credit and a 30-day trial window expire at roughly the same
 time.
 
-**The bill that can actually hurt is Anthropic's, not Railway's.**
-`/api/chat` has no authentication and no rate limit — a public URL is an
-open path to a paid model for anyone who finds it. `MAX_TOKENS` caps cost
-per call, nothing caps calls per hour. Don't post the URL publicly, and
-delete the project when you're done experimenting. This is the gap
-tracked as backlog §5 in [`decisions/README.md`](README.md), and deploying
-is what made it urgent rather than theoretical.
+**The bill that can actually hurt is Anthropic's, not Railway's.** ADR 0020
+adds a login and rate limits, but they're intentionally loose (20
+requests/hour, a daily token budget) — don't post the URL publicly, and
+delete the project when you're done experimenting.

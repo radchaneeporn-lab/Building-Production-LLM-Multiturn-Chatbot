@@ -3,42 +3,14 @@ from __future__ import annotations
 import os
 from typing import Protocol
 
-# ---------------------------------------------------------------------------
-# LEARNING NOTE — closing backlog §5's "Done when: /chat is no longer an open,
-# unmetered proxy to a paid model." See ADR 0020.
-#
-# Two DIFFERENT limits live here, and conflating them is the classic mistake:
-#
-#   1. REQUESTS per identity per hour  — stops one caller hammering the API.
-#      Bounds abuse. Does NOT bound cost: 20 short messages and 20 messages
-#      that each generate 712 tokens cost very different amounts.
-#
-#   2. OUTPUT TOKENS per day, globally — bounds the bill. This is the only
-#      control here that maps onto money, because tokens are the unit
-#      Anthropic charges for. A request limit is a proxy for cost; a token
-#      budget IS cost.
-#
-# Rate limiting is usually taught as (1) alone. For an app whose marginal cost
-# is a model call, (1) alone lets twenty well-behaved users spend a fortune
-# while staying under every limit.
-# ---------------------------------------------------------------------------
-
 
 class RateLimitExceeded(Exception):
-    """Raised when a call must be refused. Carries the HTTP shape with it.
+    """Raised when a call must be refused.
 
-    [LEARNING] Two different refusals, deliberately different status codes:
-
-      429 Too Many Requests — YOU are going too fast. Retry later and it
-          will work. A per-identity problem.
-      503 Service Unavailable — the SERVICE is out of budget. Retrying
-          sooner changes nothing; nobody gets served until tomorrow. A
-          global problem that is not the caller's fault.
-
-    Returning 429 for both would tell a user "slow down" when the true
-    answer is "come back tomorrow" — a status code is a machine-readable
-    claim about what happens if the client retries, so getting it wrong
-    makes well-behaved clients misbehave.
+    429 means the caller is going too fast and a retry will work. 503
+    means the service is out of budget and retrying sooner won't help —
+    different status codes because a retrying client needs to know which
+    one it's dealing with.
     """
 
     def __init__(self, detail: str, status_code: int = 429, retry_after: int | None = None):
@@ -49,15 +21,8 @@ class RateLimitExceeded(Exception):
 
 
 class RateLimiter(Protocol):
-    """The seam, defined the same way ConversationStore was in ADR 0006.
-
-    [LEARNING] A Protocol again, for the same reason: `main_service.py` and
-    `main_plain.py` run on a laptop with no database and must not need a
-    rate limiter to exist. NullRateLimiter satisfies this and does nothing,
-    so the CLI paths keep working untouched — the seam is what lets one
-    concern be present in one deployment and absent in another without an
-    `if` in the calling code.
-    """
+    """Same seam pattern as ConversationStore. NullRateLimiter lets the
+    CLI entry points run with no database and no limits."""
 
     def check(self, key: str) -> None:
         """Raise RateLimitExceeded if this call must not proceed."""
@@ -71,7 +36,7 @@ class RateLimiter(Protocol):
 
 
 class NullRateLimiter:
-    """No limits. The laptop/CLI default, and the InMemoryStore of this seam."""
+    """No limits — the local/CLI default."""
 
     def check(self, key: str) -> None:
         return None
@@ -84,19 +49,10 @@ class NullRateLimiter:
 
 
 class PostgresRateLimiter:
-    """Counters in Postgres, so limits survive redeploys and extra replicas.
-
-    [LEARNING] Why not a dict in the process? Two reasons, both of which
-    ADR 0017 already argued once for `turn_index`:
-
-      - A redeploy resets it. This app redeploys on every push to main, so
-        an in-memory limit is a limit anyone can clear by waiting for you
-        to ship something.
-      - It protects exactly one replica. Solving a shared-state problem
-        with a local primitive is the trap 0017 named; it would be strange
-        to reject an in-process lock for the store and then accept an
-        in-process counter for the thing guarding the money.
-    """
+    """Counters in Postgres, not memory, so limits survive redeploys and
+    hold across replicas. Enforces two separate limits: requests per
+    identity per hour (bounds abuse) and output tokens per day, globally
+    (bounds the bill — tokens are the billed unit, requests aren't)."""
 
     def __init__(
         self,
@@ -115,23 +71,15 @@ class PostgresRateLimiter:
         self.requests_per_hour = requests_per_hour
         self.daily_output_token_budget = daily_output_token_budget
 
-        # [LEARNING] Its own SMALL pool rather than sharing PostgresStore's.
-        # Honest tradeoff: it keeps this class independent of which store is
-        # in use (it works with SQLiteStore too), at the cost of more open
-        # connections — and 0017 flagged total connection count as a real
-        # capacity limit. max_size=3 because every request touches this at
-        # most twice and the queries are single-row upserts.
+        # Its own small pool, independent of whichever store is in use.
         self._pool = ConnectionPool(conninfo, min_size=1, max_size=3, open=True)
         self._pool.wait(timeout=30)
         self._create_schema()
 
     def _create_schema(self) -> None:
         with self._pool.connection() as conn:
-            # [LEARNING] The window is part of the PRIMARY KEY, not a column
-            # to be reset. Nothing ever deletes or zeroes a counter: a new
-            # hour is simply a new row. That removes the "who resets the
-            # counter, and what if two processes reset it at once" problem
-            # entirely — the same append-only reasoning as ADR 0008.
+            # The window is part of the primary key — a new hour is a new
+            # row, so nothing ever resets or zeroes a counter.
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS rate_limit_counters (
@@ -155,18 +103,8 @@ class PostgresRateLimiter:
 
     def check(self, key: str) -> None:
         with self._pool.connection() as conn:
-            # [LEARNING] THE important line in this file. One statement that
-            # inserts-or-increments and hands back the new value:
-            #
-            #   INSERT ... ON CONFLICT ... DO UPDATE SET count = count + 1
-            #   RETURNING count
-            #
-            # Compare what ADR 0017 had to fix in append(): SELECT COUNT(*),
-            # then INSERT — two statements, so two callers could both read N
-            # and both write N+1. Here the read and the write are the SAME
-            # statement, so the database serialises them on the row and the
-            # count cannot be lost. No FOR UPDATE needed, because there is no
-            # gap between reading and writing to race in.
+            # Insert-or-increment and return the new count in one
+            # statement, so there's no read-then-write gap to race in.
             row = conn.execute(
                 """
                 INSERT INTO rate_limit_counters (key, window_start, count)
@@ -180,11 +118,8 @@ class PostgresRateLimiter:
             count = row[0]
 
             if count > self.requests_per_hour:
-                # [LEARNING] Counted BEFORE deciding, and the increment stands
-                # even on refusal. That means hammering a 429 keeps the number
-                # climbing rather than letting a caller probe the boundary for
-                # free — refusals are cheap for us and should not be free for
-                # them.
+                # The increment stands even on refusal, so hammering a 429
+                # isn't a free way to probe the limit.
                 raise RateLimitExceeded(
                     f"Rate limit: {self.requests_per_hour} messages per hour. "
                     "Try again in a little while.",
@@ -203,17 +138,9 @@ class PostgresRateLimiter:
                 )
 
     def record(self, input_tokens: int, output_tokens: int) -> None:
-        # [LEARNING] Called AFTER a successful call, because until the model
-        # answers nobody knows what it cost — output tokens are not knowable
-        # in advance. That is why the budget check above is "has the budget
-        # ALREADY been exceeded" and not "would this call exceed it": the
-        # cap can overshoot by up to one call per concurrent request.
-        #
-        # That is a deliberate accepted inaccuracy, not an oversight. Making
-        # it exact would need a reservation before the call and a settlement
-        # after it (the pattern hotels use for a card pre-authorisation),
-        # which is a lot of machinery to avoid overshooting a soft budget by
-        # a few hundred tokens.
+        # Called after the call succeeds, since output tokens aren't known
+        # beforehand — the budget check above can overshoot by up to one
+        # concurrent call, which is accepted.
         with self._pool.connection() as conn:
             conn.execute(
                 """
@@ -240,11 +167,7 @@ class PostgresRateLimiter:
 
 
 def load_rate_limiter() -> RateLimiter:
-    """Pick a limiter from the environment, same shape as load_store().
-
-    DATABASE_URL set   -> PostgresRateLimiter (the deployed path)
-    DATABASE_URL unset -> NullRateLimiter (a laptop; nothing to protect)
-    """
+    """DATABASE_URL set -> PostgresRateLimiter; unset -> NullRateLimiter."""
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         return NullRateLimiter()
