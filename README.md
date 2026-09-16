@@ -1,12 +1,12 @@
 # Production-Agentic-Multiturn-Chatbot
 
 A multi-turn chatbot backed by Claude, with a password-gated Next.js frontend,
-a FastAPI backend, and PostgreSQL for storage — the same stack you'd reach for
-in a real deployment, not a toy demo. Clone it, run it locally in a few
+a FastAPI backend, and PostgreSQL for storage: the same stack you'd reach for
+in a real deployment. Clone it, run it locally in a few
 minutes, and deploy your own copy when you're ready.
 
 Every non-obvious decision along the way is written down, so if you want to
-know *why* something is built the way it is, that's in [`docs/decisions`](docs/decisions/README.md) — this README is just about getting it running.
+know *why* something is built the way it is, that's in [`docs/decisions`](docs/decisions/README.md). This README is just about getting it running.
 
 ## What you get
 
@@ -21,7 +21,7 @@ browser ──▶ frontend (Next.js)  PUBLIC   cookie auth, proxies to:
 ```
 
 One public URL (the frontend). The backend and database are never exposed
-directly — the frontend forwards requests to the backend over a private
+directly: the frontend forwards requests to the backend over a private
 network, and the backend won't even start without its own internal secret.
 
 ## Before you start
@@ -30,9 +30,9 @@ You need:
 
 - [Docker](https://docs.docker.com/get-docker/) and Docker Compose (comes
   bundled with Docker Desktop)
-- An Anthropic API key — get one at [console.anthropic.com](https://console.anthropic.com)
+- An Anthropic API key, get one at [console.anthropic.com](https://console.anthropic.com)
 
-That's it. Docker builds and runs everything else — Python, Node, and
+That's it. Docker builds and runs everything else: Python, Node, and
 Postgres included.
 
 ## Run it locally
@@ -52,7 +52,7 @@ Postgres included.
    ```
 
    Everything else in `.env.example` already has a working default for
-   local use — you don't need to touch it yet.
+   local use, you don't need to touch it yet.
 
 3. Build and start everything:
 
@@ -61,7 +61,7 @@ Postgres included.
    ```
 
 4. Open [http://localhost:3000](http://localhost:3000) and log in with the
-   password `letmein` (that's the dev default — see below for changing it).
+   password `letmein` (that's the dev default; see below for changing it).
 
 That's a working chatbot: a Next.js UI, talking to a FastAPI backend, backed
 by a real Postgres database, all on your machine.
@@ -79,8 +79,8 @@ A few other things worth knowing while it's running:
 
 ## Running without Docker
 
-If you'd rather run the Python side directly — say, while you're editing
-code — you don't need Postgres or a container at all:
+If you'd rather run the Python side directly, say while you're editing
+code, you don't need Postgres or a container at all:
 
 ```bash
 pip install -e .
@@ -95,12 +95,12 @@ uvicorn main_api:app --reload
 ```
 
 With no `DATABASE_URL` set, the app quietly falls back to SQLite and skips
-rate limiting — there's nothing extra to install or configure for local
+rate limiting. There's nothing extra to install or configure for local
 development.
 
 ## Configuration
 
-Everything the app needs comes from environment variables — nothing is
+Everything the app needs comes from environment variables. Nothing is
 hardcoded into the Docker images, so the same build runs anywhere. The two
 you must set are your API key and a shared internal secret; everything else
 has a working default.
@@ -108,7 +108,7 @@ has a working default.
 | Variable | Used by | Required? | What it does |
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | backend | **yes** | Your Claude API key. |
-| `INTERNAL_API_KEY` | both | **yes** | Shared secret between frontend and backend — must be identical on both. The backend refuses to start without it. |
+| `INTERNAL_API_KEY` | both | **yes** | Shared secret between frontend and backend, must be identical on both. The backend refuses to start without it. |
 | `APP_PASSWORD` | frontend | no (default: `letmein`) | The password visitors use to log into the chat UI. |
 | `COOKIE_SECRET` | frontend | no | Signs the login cookie. Use a real random value outside local dev. |
 | `DATABASE_URL` | backend | no | If set, uses Postgres. If unset, falls back to a local SQLite file. |
@@ -126,19 +126,19 @@ The version above is fine for trying things out, but it's running on your
 laptop with dev-only secrets and no public URL. To put a real copy online:
 
 1. Generate real random values for `INTERNAL_API_KEY`, `COOKIE_SECRET`, and
-   `APP_PASSWORD` — don't reuse the local defaults.
+   `APP_PASSWORD`. Don't reuse the local defaults.
 2. Deploy the two Dockerfiles (`Dockerfile` for the backend,
    `frontend/Dockerfile` for the frontend) plus a Postgres database to
    whatever platform you like. We deployed to [Railway](https://railway.app),
    and [`docs/decisions/deploy-railway.md`](docs/decisions/deploy-railway.md)
-   is the exact, step-by-step runbook we followed — including the mistakes
+   is the exact, step-by-step runbook we followed, including the mistakes
    that cost us time, so you don't have to repeat them.
 3. Keep the backend off the public internet. Only the frontend needs a
    public domain; the backend should only be reachable from the frontend,
    over the platform's private network.
 
 If you're deploying somewhere other than Railway, the runbook's reasoning
-still applies even if the exact commands don't — the important parts are:
+still applies even if the exact commands don't. The important parts are:
 inject secrets as environment variables (never bake them into the image),
 give the backend no public domain, and point the frontend at the backend's
 private address.
@@ -146,7 +146,7 @@ private address.
 ## What's under the hood
 
 ```
-src/chatbot/            the core logic — no HTTP, no framework
+src/chatbot/            the core logic, no HTTP, no framework
   client.py             talks to the Anthropic API
   storage.py            saves and loads conversations (SQLite or Postgres)
   service.py            ties a turn together: load, ask the model, save
@@ -159,9 +159,9 @@ main_service.py         a local command-line version, no server needed
 frontend/               the Next.js chat UI and its login/proxy routes
 ```
 
-If you want the reasoning behind any of this — why Postgres and not just a
+If you want the reasoning behind any of this (why Postgres and not just a
 file, why the backend requires a shared secret, why long conversations get
-summarized instead of just cut off — it's all in
+summarized instead of just cut off) it's all in
 [`docs/decisions`](docs/decisions/README.md):
 
 | | |
